@@ -17,6 +17,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 class PatternAnalyzer:
     """Analyzes patterns in county records data."""
+    
+    # Configuration constants
+    ZERO_PADDED_MERGE_THRESHOLD = 0.05  # Merge zero-padded into numeric if < 5% of records
+    OTHER_BUCKET_THRESHOLD_PCT = 0.02   # Include pattern in top-N if > 2% of records
+    OTHER_BUCKET_THRESHOLD_MIN = 100    # Or if pattern has at least 100 records
+    MAX_EXAMPLES_PER_FAMILY = 20        # Examples collected per family for regex generation
+    MAX_ANOMALY_EXAMPLES = 5            # Maximum anomaly examples to store per type
+    TOP_N_PATTERNS = 5                  # Always include top N patterns per county
 
     def __init__(self):
         """Initialize data structures for pattern analysis."""
@@ -149,7 +157,7 @@ class PatternAnalyzer:
         # Handle null dates
         if date_value is None or date_value == "":
             county_data["anomaly_counts"]["null_date"] += 1
-            if len(county_data["anomalies"]["null_date"]) < 5:
+            if len(county_data["anomalies"]["null_date"]) < self.MAX_ANOMALY_EXAMPLES:
                 county_data["anomalies"]["null_date"].append({
                     "date": None,
                     "instrument_number": inst_num
@@ -179,7 +187,7 @@ class PatternAnalyzer:
             # Future date check: any date after today's date at runtime
             if date_only > today:
                 county_data["anomaly_counts"]["future_date"] += 1
-                if len(county_data["anomalies"]["future_date"]) < 5:
+                if len(county_data["anomalies"]["future_date"]) < self.MAX_ANOMALY_EXAMPLES:
                     county_data["anomalies"]["future_date"].append({
                         "date": date_str,
                         "instrument_number": inst_num
@@ -189,7 +197,7 @@ class PatternAnalyzer:
             # Conservative heuristic as prompt does not define threshold
             if date_only < datetime(1900, 1, 1).date():
                 county_data["anomaly_counts"]["very_old_date"] += 1
-                if len(county_data["anomalies"]["very_old_date"]) < 5:
+                if len(county_data["anomalies"]["very_old_date"]) < self.MAX_ANOMALY_EXAMPLES:
                     county_data["anomalies"]["very_old_date"].append({
                         "date": date_str,
                         "instrument_number": inst_num
@@ -198,11 +206,41 @@ class PatternAnalyzer:
         except (ValueError, AttributeError) as e:
             # Unparseable date
             county_data["anomaly_counts"]["unparseable_date"] += 1
-            if len(county_data["anomalies"]["unparseable_date"]) < 5:
+            if len(county_data["anomalies"]["unparseable_date"]) < self.MAX_ANOMALY_EXAMPLES:
                 county_data["anomalies"]["unparseable_date"].append({
                     "date": str(date_value),
                     "instrument_number": inst_num
                 })
+
+    def _process_book_page_field(self, county_data: Dict, field_name: str, value: Any):
+        """
+        Process a book or page field value.
+        
+        Args:
+            county_data: County data dictionary
+            field_name: "book" or "page"
+            value: Field value to process
+        """
+        family, numeric_val = self.classify_book_page(value)
+        field_data = county_data[field_name]
+        
+        # Count family occurrence
+        field_data["families"][family] += 1
+        
+        # Store first example for each family
+        if family not in field_data["examples"]:
+            field_data["examples"][family] = str(value) if value is not None else None
+            field_data["values"][family] = []
+        
+        # Collect examples for regex generation (capped at MAX_EXAMPLES_PER_FAMILY)
+        if len(field_data["values"][family]) < self.MAX_EXAMPLES_PER_FAMILY:
+            if value is not None:
+                field_data["values"][family].append(str(value))
+        
+        # Track numeric values (both overall and per-family)
+        if numeric_val is not None:
+            field_data["numeric_values"].append(numeric_val)
+            field_data["numeric_values_by_family"][family].append(numeric_val)
 
     def process_record(self, record: Dict[str, Any]):
         """Process a single JSON record."""
@@ -221,47 +259,16 @@ class PatternAnalyzer:
         # Store first example for each family
         if inst_family not in county_data["instrument"]["examples"]:
             county_data["instrument"]["examples"][inst_family] = str(inst_value) if inst_value is not None else None
-            # Store multiple examples for regex generation
             county_data["instrument"]["values"][inst_family] = []
         
-        # Collect examples for regex generation (up to 20 per family)
-        if len(county_data["instrument"]["values"][inst_family]) < 20:
+        # Collect examples for regex generation (capped at MAX_EXAMPLES_PER_FAMILY)
+        if len(county_data["instrument"]["values"][inst_family]) < self.MAX_EXAMPLES_PER_FAMILY:
             if inst_value is not None:
                 county_data["instrument"]["values"][inst_family].append(str(inst_value))
         
-        # Process book number
-        book_value = record.get("book")
-        book_family, book_numeric = self.classify_book_page(book_value)
-        county_data["book"]["families"][book_family] += 1
-        
-        if book_family not in county_data["book"]["examples"]:
-            county_data["book"]["examples"][book_family] = str(book_value) if book_value is not None else None
-            county_data["book"]["values"][book_family] = []
-        
-        if len(county_data["book"]["values"][book_family]) < 20:
-            if book_value is not None:
-                county_data["book"]["values"][book_family].append(str(book_value))
-        
-        if book_numeric is not None:
-            county_data["book"]["numeric_values"].append(book_numeric)
-            county_data["book"]["numeric_values_by_family"][book_family].append(book_numeric)
-        
-        # Process page number
-        page_value = record.get("page")
-        page_family, page_numeric = self.classify_book_page(page_value)
-        county_data["page"]["families"][page_family] += 1
-        
-        if page_family not in county_data["page"]["examples"]:
-            county_data["page"]["examples"][page_family] = str(page_value) if page_value is not None else None
-            county_data["page"]["values"][page_family] = []
-        
-        if len(county_data["page"]["values"][page_family]) < 20:
-            if page_value is not None:
-                county_data["page"]["values"][page_family].append(str(page_value))
-        
-        if page_numeric is not None:
-            county_data["page"]["numeric_values"].append(page_numeric)
-            county_data["page"]["numeric_values_by_family"][page_family].append(page_numeric)
+        # Process book and page numbers (using helper method to avoid duplication)
+        self._process_book_page_field(county_data, "book", record.get("book"))
+        self._process_book_page_field(county_data, "page", record.get("page"))
         
         # Process dates
         self.track_date(county, record.get("date"), str(inst_value))
@@ -420,10 +427,11 @@ class PatternAnalyzer:
         patterns = []
         included_count = 0
         included_families = set()
-        threshold = max(total * 0.02, 100)  # 2% or 100 records
+        threshold = max(total * self.OTHER_BUCKET_THRESHOLD_PCT, 
+                       self.OTHER_BUCKET_THRESHOLD_MIN)
         
-        # Always include top 3-5
-        top_n = min(5, len(sorted_families))
+        # Always include top N patterns
+        top_n = min(self.TOP_N_PATTERNS, len(sorted_families))
         for i, (family, count) in enumerate(sorted_families):
             if i < top_n or count >= threshold:
                 example_values = county_data["instrument"]["values"].get(family, [])
@@ -488,13 +496,13 @@ class PatternAnalyzer:
         
         patterns = []
         
-        # Check if zero_padded should be merged with numeric (if < 5%)
+        # Check if zero_padded should be merged with numeric
         zero_padded_count = families.get("zero_padded_numeric", 0)
         numeric_count = families.get("numeric", 0)
         
         merge_zero_padded = False
         if zero_padded_count > 0 and non_null_total > 0:
-            if zero_padded_count / non_null_total < 0.05:
+            if zero_padded_count / non_null_total < self.ZERO_PADDED_MERGE_THRESHOLD:
                 merge_zero_padded = True
         
         for family, count in sorted_families:
@@ -648,6 +656,7 @@ def main():
     # Stream JSONL line-by-line
     line_count = 0
     error_count = 0
+    failed_lines = []  # Track first 10 failed line numbers for debugging
     
     try:
         with open(input_file, "r", encoding="utf-8") as f:
@@ -666,14 +675,24 @@ def main():
                     analyzer.process_record(record)
                 except json.JSONDecodeError as e:
                     error_count += 1
+                    if len(failed_lines) < 10:
+                        failed_lines.append(line_num)
                     print(f"\nError parsing line {line_num}: {e}", file=sys.stderr)
+                    print(f"  Content preview: {line[:100]}...", file=sys.stderr)
                     continue
                 except Exception as e:
                     error_count += 1
+                    if len(failed_lines) < 10:
+                        failed_lines.append(line_num)
                     print(f"\nError processing line {line_num}: {e}", file=sys.stderr)
                     continue
         
-        print(f"\nProcessed {line_count} records ({error_count} errors)")
+        # Clear progress indicator and print final summary
+        print(" " * 60, end="\r")
+        print(f"Processed {line_count} records ({error_count} errors)")
+        
+        if failed_lines:
+            print(f"Failed line numbers (first 10): {failed_lines}", file=sys.stderr)
         
         # Generate output
         print("Generating pattern analysis...")
