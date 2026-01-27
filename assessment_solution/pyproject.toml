@@ -1,0 +1,13 @@
+[tool.black]
+line-length = 100
+target-version = ["py39"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E203"]  # compatible with black
+
+[tool.ruff.format]
+quote-style = "double"
+

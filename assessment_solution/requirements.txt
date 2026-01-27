@@ -1,0 +1,8 @@
+pandas
+python-dateutil
+tqdm
+requests
+beautifulsoup4
+lxml
+black
+ruff
