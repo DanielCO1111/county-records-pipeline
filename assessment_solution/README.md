@@ -4,19 +4,46 @@
 
 ---
 
+## 📋 Tasks Overview
+
+### ✅ Task 1: County Pattern Analysis (COMPLETE)
+**Script:** `src/pattern_analyzer.py`  
+**Output:** `outputs/county_patterns.json`  
+**Objective:** Extract and document patterns in instrument numbers, book/page numbers, date ranges, and document types for each of the 13 NC counties.
+
+### 🔜 Task 2: TBD
+(To be implemented)
+
+---
+
 ## 📁 Project Structure
 
 ```
 assessment_solution/
-├── src/              # Source code implementation
-├── outputs/          # Generated results and deliverables
-├── requirements.txt  # Python dependencies
-├── pyproject.toml    # Code formatting/linting configuration
-└── README.md         # This file
+├── src/
+│   └── pattern_analyzer.py      # Task 1: County pattern analysis
+├── outputs/
+│   └── county_patterns.json     # Task 1: Generated analysis results
+├── requirements.txt              # Python dependencies
+├── pyproject.toml               # Code formatting/linting configuration
+└── README.md                    # This file
 
-../
-├── nc_records_assessment.jsonl  # Input data (JSONL format, ~14K records)
-└── records/                     # PDF files organized by county/instrument_number.pdf
+../  (parent directory)
+├── nc_records_assessment.jsonl  # Input: JSONL data (~14K records, ~2-3 MB)
+└── records/                     # Input: PDF files by county (optional for Task 1)
+    ├── alamance/
+    ├── buncombe/
+    ├── cabarrus/
+    ├── cumberland/
+    ├── davidson/
+    ├── durham/
+    ├── forsyth/
+    ├── guilford/
+    ├── johnston/
+    ├── mecklenburg/
+    ├── onslow/
+    ├── union/
+    └── wake/
 ```
 
 > **Note:** Input data files are stored one directory above and are **not committed to git** due to size.
@@ -111,69 +138,43 @@ black .
 
 ## 💻 Usage
 
-### Running the Pattern Analyzer
+### Task 1: County Pattern Analysis
 
-From the project root directory:
+**Objective:** Extract and document patterns in instrument numbers, book/page numbers, date ranges, and document types for each county.
+
+**Run the script:**
 
 ```bash
-# Navigate to assessment solution directory
 cd assessment_solution
-
-# Run the pattern analyzer
 python src/pattern_analyzer.py
 ```
 
-The script will:
-1. ✅ Read `nc_records_assessment.jsonl` (from parent directory)
-2. ✅ Process all ~13,886 records using streaming (line-by-line)
-3. ✅ Generate `outputs/county_patterns.json` with analysis results
-4. ✅ Display progress updates every 1,000 records
-5. ✅ Report total records processed and any errors
+**Output:** `outputs/county_patterns.json`
 
-**Expected Output:**
-```
-Reading records from: .../nc_records_assessment.jsonl
-Processing records (streaming mode)...
-Processed 13886 records (0 errors)
-Generating pattern analysis...
-Writing results to: .../outputs/county_patterns.json
-
-============================================================
-PATTERN ANALYSIS COMPLETE
-============================================================
-Counties analyzed: 13
-Total records: 13886
-Output file: .../outputs/county_patterns.json
-============================================================
-```
-
-**Performance:**
-- Processing time: ~5-10 seconds on modern hardware
-- Memory usage: < 100MB (streaming design)
-- No external dependencies beyond Python standard library + requirements.txt
+**What it does:**
+- Analyzes instrument number formats (regex patterns, counts, percentages)
+- Identifies book/page number patterns with ranges
+- Tracks date ranges and anomalies (future dates, very old dates, nulls)
+- Generates document type distribution (top 10) and category mappings
+- Processes 13,886 records in 5-10 seconds
 
 ---
 
-## 📝 Data Format
+## 📝 Task 1: Input Data Format
 
-### Input: `nc_records_assessment.jsonl`
+### `nc_records_assessment.jsonl`
 - **Format:** JSONL (one JSON record per line)
-- **Records:** ~13,887 entries
-- **Structure:** Each line contains a JSON object with record metadata
+- **Records:** 13,886 entries
+- **Location:** Parent directory (`../nc_records_assessment.jsonl`)
+- **Structure:** Each line contains a property record with fields like:
+  - `instrument_number`, `parcel_number`, `county`, `state`
+  - `book`, `page`, `doc_type`, `doc_category`
+  - `grantors`, `grantees`, `date`, `consideration`
 
-### Input: `records/`
-- **Format:** PDF files
+### `records/` Directory
+- **Format:** PDF files (not used in Task 1)
 - **Organization:** `county/instrument_number.pdf`
-- **Counties:** alamance, buncombe, cabarrus, cumberland, davidson, durham, forsyth, guilford, johnston, mecklenburg, onslow, union, wake
-
----
-
-## 📦 Outputs
-
-Generated results and deliverables will be saved to:
-```
-assessment_solution/outputs/
-```
+- **Counties:** 13 total (alamance, buncombe, cabarrus, cumberland, davidson, durham, forsyth, guilford, johnston, mecklenburg, onslow, union, wake)
 
 ---
 
@@ -277,99 +278,28 @@ Instrument numbers are classified using strict precedence order:
 
 ---
 
-## 🧪 For Project Testers
-
-### What to Verify
-
-1. **Output Schema Compliance:**
-   - All 13 counties present in output
-   - Required fields: `record_count`, `instrument_patterns`, `book_patterns`, `page_patterns`, `date_range`, `doc_type_distribution`, `unique_doc_types`, `doc_type_to_category_mapping`
-   - Pattern objects have: `pattern`, `regex`, `example`, `count`, `percentage`
-   - Ranges present for numeric patterns
-
-2. **Data Accuracy:**
-   - Anomaly counts represent total occurrences (not just examples)
-   - Percentages sum to ~100% (of non-null values)
-   - Ranges are family-specific (different for different pattern types)
-   - Top 10 doc_types only (not full distribution)
-
-3. **Pattern Quality:**
-   - Regex patterns match their descriptions
-   - Examples are real values from dataset
-   - Top patterns capture majority of records (>90%)
-   - "other" bucket is small (<10%)
-
-4. **Edge Cases Handled:**
-   - `bp` prefix synthetic IDs classified separately
-   - Null values counted separately (not in patterns)
-   - Zero-padded merged when < 5%
-   - Mixed year-letter values (e.g., `20240091879C`) in alphanumeric, not year_prefixed
-
-### Known Limitations
-
-1. **Single-pass processing** - Cannot make multiple passes over data
-2. **ISO date parsing only** - Non-ISO dates flagged as unparseable (intentional for data quality)
-3. **No PDF analysis** - Only analyzes JSONL metadata, not PDF contents
-4. **Memory-efficient trade-offs** - Caps examples at 5-20 per pattern
-
-### Troubleshooting
-
-**"File not found" error:**
-- Ensure `nc_records_assessment.jsonl` is in parent directory (one level up from `assessment_solution/`)
-
-**"No module named X" error:**
-- Run `pip install -r requirements.txt` in virtual environment
-
-**Unexpected pattern classifications:**
-- Review classification precedence order (section 1 above)
-- Check if values match strict format definitions (digits-only for year patterns)
-
----
-
-## 🚀 Quick Start (For Testers)
-
-**Complete workflow from scratch:**
+## 🚀 Quick Start
 
 ```bash
-# 1. Clone/extract project
-cd Dono_DataEngineering_Assessment/assessment_solution
-
-# 2. Create virtual environment
+# 1. Setup (one-time)
+cd assessment_solution
 python -m venv .venv
+.\.venv\Scripts\Activate.ps1          # Windows PowerShell
+# OR
+source .venv/bin/activate             # Linux/macOS
 
-# 3. Activate virtual environment
-# Windows PowerShell:
-.\.venv\Scripts\Activate.ps1
-# Linux/macOS:
-source .venv/bin/activate
-
-# 4. Install dependencies
 python -m pip install -U pip
 python -m pip install -r requirements.txt
 
-# 5. Run pattern analyzer
+# 2. Run Task 1 - Pattern Analyzer
 python src/pattern_analyzer.py
 
-# 6. Check output
-cat outputs/county_patterns.json  # Linux/macOS
-type outputs\county_patterns.json  # Windows
+# Output: outputs/county_patterns.json
 ```
 
-**Expected runtime:** 5-10 seconds  
-**Expected output size:** ~60 KB JSON file
-
-### Testing Checklist
-
-- [ ] Script completes without errors
-- [ ] Output file created at `outputs/county_patterns.json`
-- [ ] All 13 counties present in output
-- [ ] Each county has all required fields
-- [ ] Anomaly counts > examples (for null_date, usually 20-30 total vs 5 examples)
-- [ ] Ranges different for different pattern families
-- [ ] doc_type_distribution has exactly 10 entries per county
-- [ ] Progress indicator displays during processing
-- [ ] Final summary shows 13,886 records processed
+**Expected:** Processes 13,886 records in 5-10 seconds.
 
 ---
 
-**Last Updated:** January 2026
+**Last Updated:** January 2026  
+**Status:** Task 1 complete, ready for Task 2
