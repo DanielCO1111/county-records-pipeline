@@ -52,8 +52,8 @@
         "percentage": 6.1,
         "null_count": 0,
         "range": {
-          "min": 18,
-          "max": 4779
+          "min": 894,
+          "max": 909
         }
       }
     ],
@@ -79,8 +79,8 @@
         "percentage": 8.5,
         "null_count": 0,
         "range": {
-          "min": 11,
-          "max": 917
+          "min": 104,
+          "max": 778
         }
       }
     ],
@@ -106,7 +106,7 @@
         },
         {
           "type": "null_date",
-          "count": 5,
+          "count": 7,
           "examples": [
             {
               "date": null,
@@ -174,8 +174,8 @@
         "percentage": 3.8
       },
       {
-        "pattern": "year-prefixed (variable)",
-        "regex": "^(19|20)\\d+$",
+        "pattern": "alphanumeric",
+        "regex": "^[a-zA-Z0-9]+$",
         "example": "20220062162E",
         "count": 2,
         "percentage": 1.5
@@ -236,7 +236,7 @@
         },
         {
           "type": "null_date",
-          "count": 5,
+          "count": 13,
           "examples": [
             {
               "date": null,
@@ -327,7 +327,7 @@
       {
         "pattern": "other/anomalies",
         "regex": null,
-        "example": "1983-02828",
+        "example": "5154 0176",
         "count": 3,
         "percentage": 0.7
       }
@@ -369,7 +369,7 @@
         "null_count": 0,
         "range": {
           "min": 1,
-          "max": 847
+          "max": 346
         }
       },
       {
@@ -404,7 +404,7 @@
         },
         {
           "type": "null_date",
-          "count": 5,
+          "count": 33,
           "examples": [
             {
               "date": null,
@@ -461,7 +461,7 @@
         "pattern": "year-5digit",
         "regex": "^(19|20)\\d{2}-\\d{5}$",
         "example": "2007-06494",
-        "count": 2338,
+        "count": 2337,
         "percentage": 94.3
       },
       {
@@ -479,25 +479,25 @@
         "percentage": 1.1
       },
       {
-        "pattern": "5digit year-prefixed",
-        "regex": "^(19|20)\\d{3}$",
-        "example": "20220173191K",
-        "count": 5,
-        "percentage": 0.2
-      },
-      {
         "pattern": "alphanumeric",
         "regex": "^[a-zA-Z0-9]+$",
-        "example": "BK7242PG572",
-        "count": 2,
+        "example": "20220173191K",
+        "count": 3,
+        "percentage": 0.1
+      },
+      {
+        "pattern": "5digit year-prefixed",
+        "regex": "^(19|20)\\d{3}$",
+        "example": "19078",
+        "count": 3,
         "percentage": 0.1
       },
       {
         "pattern": "other/anomalies",
         "regex": null,
-        "example": "2007-06494",
-        "count": 1,
-        "percentage": 0.0
+        "example": "19671015/",
+        "count": 3,
+        "percentage": 0.1
       }
     ],
     "book_patterns": [
@@ -594,7 +594,7 @@
         },
         {
           "type": "null_date",
-          "count": 5,
+          "count": 95,
           "examples": [
             {
               "date": null,
@@ -822,7 +822,7 @@
         },
         {
           "type": "null_date",
-          "count": 5,
+          "count": 12,
           "examples": [
             {
               "date": null,
@@ -1091,8 +1091,8 @@
         "pattern": "year-prefixed (variable)",
         "regex": "^(19|20)\\d+$",
         "example": "2022806081",
-        "count": 2231,
-        "percentage": 89.5
+        "count": 2229,
+        "percentage": 89.4
       },
       {
         "pattern": "7digit numeric",
@@ -1107,6 +1107,13 @@
         "example": "bp21125",
         "count": 10,
         "percentage": 0.4
+      },
+      {
+        "pattern": "alphanumeric",
+        "regex": "^[a-zA-Z0-9]+$",
+        "example": "20200113743E",
+        "count": 2,
+        "percentage": 0.1
       }
     ],
     "book_patterns": [
@@ -1160,7 +1167,7 @@
         },
         {
           "type": "null_date",
-          "count": 5,
+          "count": 46,
           "examples": [
             {
               "date": null,
@@ -1217,7 +1224,7 @@
         "pattern": "10digit year-prefixed",
         "regex": "^(19|20)\\d{8}$",
         "example": "2023067542",
-        "count": 2226,
+        "count": 2225,
         "percentage": 89.4
       },
       {
@@ -1233,6 +1240,13 @@
         "example": "bp19923785",
         "count": 85,
         "percentage": 3.4
+      },
+      {
+        "pattern": "alphanumeric",
+        "regex": "^[a-zA-Z0-9]+$",
+        "example": "20200074287C",
+        "count": 1,
+        "percentage": 0.0
       },
       {
         "pattern": "hyphenated (variable)",
@@ -1297,7 +1311,7 @@
         },
         {
           "type": "null_date",
-          "count": 5,
+          "count": 16,
           "examples": [
             {
               "date": null,
@@ -1565,8 +1579,8 @@
         "pattern": "10digit year-prefixed",
         "regex": "^(19|20)\\d{8}$",
         "example": "2025010010",
-        "count": 70,
-        "percentage": 2.8
+        "count": 67,
+        "percentage": 2.7
       },
       {
         "pattern": "bp prefix + variable digits",
@@ -1578,9 +1592,9 @@
       {
         "pattern": "alphanumeric",
         "regex": "^[a-zA-Z0-9]+$",
-        "example": "BK018798PG02063",
-        "count": 5,
-        "percentage": 0.2
+        "example": "20240091879C",
+        "count": 8,
+        "percentage": 0.3
       },
       {
         "pattern": "7-10digit numeric",
@@ -1672,7 +1686,7 @@
         },
         {
           "type": "null_date",
-          "count": 5,
+          "count": 26,
           "examples": [
             {
               "date": null,

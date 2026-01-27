@@ -24,14 +24,32 @@ class PatternAnalyzer:
         self.data = defaultdict(lambda: {
             "record_count": 0,
             "instrument": {"families": Counter(), "examples": {}, "values": {}},
-            "book": {"families": Counter(), "examples": {}, "values": {}, "numeric_values": []},
-            "page": {"families": Counter(), "examples": {}, "values": {}, "numeric_values": []},
+            "book": {
+                "families": Counter(),
+                "examples": {},
+                "values": {},
+                "numeric_values": [],
+                "numeric_values_by_family": defaultdict(list)
+            },
+            "page": {
+                "families": Counter(),
+                "examples": {},
+                "values": {},
+                "numeric_values": [],
+                "numeric_values_by_family": defaultdict(list)
+            },
             "dates": {"min": None, "max": None},
             "anomalies": {
                 "future_date": [],
                 "very_old_date": [],
                 "null_date": [],
                 "unparseable_date": []
+            },
+            "anomaly_counts": {
+                "future_date": 0,
+                "very_old_date": 0,
+                "null_date": 0,
+                "unparseable_date": 0
             },
             "doc_types": Counter(),
             "type_to_category": defaultdict(Counter)
@@ -44,12 +62,17 @@ class PatternAnalyzer:
         Priority order (no overlaps):
         1. null_value
         2. bp_prefixed
-        3. year_hyphen (19XX-... or 20XX-...)
+        3. year_hyphen (19XX-digits or 20XX-digits, digits only after hyphen)
         4. hyphenated (non-year)
-        5. year_prefixed (19XX/20XX, no hyphen)
+        5. year_prefixed (19XX/20XX digits, digits only, no hyphen)
         6. pure_numeric
         7. alphanumeric
         8. other
+        
+        Note: year_hyphen and year_prefixed use STRICT format interpretation:
+        - Must be digits-only after the year prefix
+        - Values like "20240091879C" (year + digits + letter) are NOT year_prefixed
+        - They fall into alphanumeric or other based on remaining rules
         """
         if value is None or value == "":
             return "null_value"
@@ -62,16 +85,16 @@ class PatternAnalyzer:
         if value_str.startswith("bp"):
             return "bp_prefixed"
         
-        # year_hyphen (e.g., 2023-0012345)
-        if re.match(r"^(19|20)\d{2}-", value_str):
+        # year_hyphen (e.g., 2023-0012345) - STRICT: digits only after hyphen
+        if re.match(r"^(19|20)\d{2}-\d+$", value_str):
             return "year_hyphen"
         
         # hyphenated (non-year)
         if "-" in value_str:
             return "hyphenated"
         
-        # year_prefixed (no hyphen)
-        if re.match(r"^(19|20)\d{2}", value_str) and len(value_str) > 4:
+        # year_prefixed (no hyphen) - STRICT: digits only, length > 4
+        if re.match(r"^(19|20)\d{2}\d+$", value_str) and len(value_str) > 4:
             return "year_prefixed"
         
         # pure_numeric
@@ -118,11 +141,14 @@ class PatternAnalyzer:
         - very_old_date: date < 1900-01-01 (heuristic)
         - null_date: date is null
         - unparseable_date: date present but cannot parse
+        
+        Note: anomaly_counts tracks TOTAL occurrences, examples are capped at 5
         """
         county_data = self.data[county]
         
         # Handle null dates
         if date_value is None or date_value == "":
+            county_data["anomaly_counts"]["null_date"] += 1
             if len(county_data["anomalies"]["null_date"]) < 5:
                 county_data["anomalies"]["null_date"].append({
                     "date": None,
@@ -152,6 +178,7 @@ class PatternAnalyzer:
             
             # Future date check: any date after today's date at runtime
             if date_only > today:
+                county_data["anomaly_counts"]["future_date"] += 1
                 if len(county_data["anomalies"]["future_date"]) < 5:
                     county_data["anomalies"]["future_date"].append({
                         "date": date_str,
@@ -161,6 +188,7 @@ class PatternAnalyzer:
             # Very old date check: before 1900-01-01
             # Conservative heuristic as prompt does not define threshold
             if date_only < datetime(1900, 1, 1).date():
+                county_data["anomaly_counts"]["very_old_date"] += 1
                 if len(county_data["anomalies"]["very_old_date"]) < 5:
                     county_data["anomalies"]["very_old_date"].append({
                         "date": date_str,
@@ -169,6 +197,7 @@ class PatternAnalyzer:
         
         except (ValueError, AttributeError) as e:
             # Unparseable date
+            county_data["anomaly_counts"]["unparseable_date"] += 1
             if len(county_data["anomalies"]["unparseable_date"]) < 5:
                 county_data["anomalies"]["unparseable_date"].append({
                     "date": str(date_value),
@@ -215,6 +244,7 @@ class PatternAnalyzer:
         
         if book_numeric is not None:
             county_data["book"]["numeric_values"].append(book_numeric)
+            county_data["book"]["numeric_values_by_family"][book_family].append(book_numeric)
         
         # Process page number
         page_value = record.get("page")
@@ -231,6 +261,7 @@ class PatternAnalyzer:
         
         if page_numeric is not None:
             county_data["page"]["numeric_values"].append(page_numeric)
+            county_data["page"]["numeric_values_by_family"][page_family].append(page_numeric)
         
         # Process dates
         self.track_date(county, record.get("date"), str(inst_value))
@@ -388,6 +419,7 @@ class PatternAnalyzer:
         
         patterns = []
         included_count = 0
+        included_families = set()
         threshold = max(total * 0.02, 100)  # 2% or 100 records
         
         # Always include top 3-5
@@ -406,16 +438,17 @@ class PatternAnalyzer:
                     "percentage": round(count / total * 100, 1)
                 })
                 included_count += count
+                included_families.add(family)
             else:
                 break
         
         # Group remaining into "other/anomalies"
         other_count = total - included_count - families.get("null_value", 0)
         if other_count > 0:
-            # Find an example from remaining families
+            # Find an example from remaining families (not in included_families set)
             other_example = None
             for family, count in sorted_families:
-                if family not in [p["pattern"] for p in patterns]:
+                if family not in included_families:
                     other_example = county_data["instrument"]["examples"].get(family)
                     break
             
@@ -488,13 +521,13 @@ class PatternAnalyzer:
                 "null_count": 0
             }
             
-            # Add range for numeric families
+            # Add range for numeric families (family-specific)
             if family in ["numeric", "zero_padded_numeric"]:
-                numeric_vals = county_data[field]["numeric_values"]
-                if numeric_vals:
+                family_numeric_vals = county_data[field]["numeric_values_by_family"][family]
+                if family_numeric_vals:
                     pattern_obj["range"] = {
-                        "min": min(numeric_vals),
-                        "max": max(numeric_vals)
+                        "min": min(family_numeric_vals),
+                        "max": max(family_numeric_vals)
                     }
                 else:
                     pattern_obj["range"] = None
@@ -529,11 +562,13 @@ class PatternAnalyzer:
             }
             
             # Format anomalies (all 4 types, even if empty)
+            # count = total occurrences, examples = capped sample
             for anomaly_type in ["future_date", "very_old_date", "null_date", "unparseable_date"]:
                 examples = county_data["anomalies"][anomaly_type]
+                total_count = county_data["anomaly_counts"][anomaly_type]
                 date_range["anomalies"].append({
                     "type": anomaly_type,
-                    "count": len(examples),
+                    "count": total_count,
                     "examples": examples
                 })
             

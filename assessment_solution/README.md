@@ -119,4 +119,33 @@ assessment_solution/outputs/
 
 ---
 
+## 📋 Notes & Assumptions
+
+### Pattern Analyzer Implementation
+
+**Format Interpretation (Strict):**
+- Instrument number patterns using year-based prefixes (`year_hyphen`, `year_prefixed`) are interpreted **strictly**:
+  - `year_hyphen`: Must match `YYYY-<digits>` where everything after the hyphen is digits only
+  - `year_prefixed`: Must match `YYYY<digits>` where the entire value is digits only (no hyphens)
+- Values that start with a year but contain letters (e.g., `20240091879C`) are **NOT** classified as year-prefixed formats
+  - These are treated as separate `alphanumeric` or `other` formats based on remaining classification rules
+  - This ensures regex patterns accurately represent the format structure
+
+**Date Anomaly Reporting:**
+- Anomaly `count` fields report **total occurrences** across all records
+- Anomaly `examples` are capped at 3-5 samples per type for memory efficiency
+- This design allows accurate anomaly frequency tracking while preventing memory bloat on large datasets
+
+**Range Computation:**
+- Book and page `range` values (min/max) are computed **per pattern family**
+  - E.g., "4-5 digit numeric" and "6-digit zero-padded" have separate ranges
+  - This provides accurate bounds for each specific format
+  
+**Date Threshold:**
+- "Very old dates" are flagged as dates before 1900-01-01
+  - This is a conservative heuristic as the requirements did not specify a threshold
+  - Balances sensitivity (catching likely data entry errors like 1490) vs false positives
+
+---
+
 **Last Updated:** January 2026
