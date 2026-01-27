@@ -523,14 +523,28 @@ class PatternAnalyzer:
             
             # Add range for numeric families (family-specific)
             if family in ["numeric", "zero_padded_numeric"]:
-                family_numeric_vals = county_data[field]["numeric_values_by_family"][family]
-                if family_numeric_vals:
-                    pattern_obj["range"] = {
-                        "min": min(family_numeric_vals),
-                        "max": max(family_numeric_vals)
-                    }
+                # If merging zero_padded into numeric, combine their ranges
+                if merge_zero_padded and family == "numeric":
+                    numeric_vals = county_data[field]["numeric_values_by_family"]["numeric"]
+                    zero_padded_vals = county_data[field]["numeric_values_by_family"]["zero_padded_numeric"]
+                    combined_vals = numeric_vals + zero_padded_vals
+                    if combined_vals:
+                        pattern_obj["range"] = {
+                            "min": min(combined_vals),
+                            "max": max(combined_vals)
+                        }
+                    else:
+                        pattern_obj["range"] = None
                 else:
-                    pattern_obj["range"] = None
+                    # Normal case: use only this family's values
+                    family_numeric_vals = county_data[field]["numeric_values_by_family"][family]
+                    if family_numeric_vals:
+                        pattern_obj["range"] = {
+                            "min": min(family_numeric_vals),
+                            "max": max(family_numeric_vals)
+                        }
+                    else:
+                        pattern_obj["range"] = None
             else:
                 pattern_obj["range"] = None
             
