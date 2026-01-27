@@ -182,6 +182,30 @@ python src/pattern_analyzer.py
 
 > **Critical for Testers:** These assumptions were made based on requirements analysis and data inspection.
 
+### ⚠️ Critical Assumptions
+
+**1. Earliest Valid Transaction Year: 1900**
+- The analysis operates on the assumption that the **earliest valid transaction year is 1900**
+- Any dates prior to `1900-01-01` are categorized as **suspicious anomalies** and flagged in the output
+- **Rationale:** Property records from before 1900 are extremely rare and likely represent data entry errors (e.g., "1490" found in dataset)
+- These are tracked under the `very_old_date` anomaly type
+
+**2. "bp" Prefix Case-Sensitivity (Lowercase Required)**
+- The analysis **strictly requires the "bp" prefix to be lowercase** for synthetic ID pattern identification
+- Instrument numbers like `bp8324`, `bp01916501155` are recognized as synthetic IDs
+- Uppercase `BP` or mixed-case variants (e.g., `Bp`, `BP`) will **NOT** be classified as `bp_prefixed`
+- Such values will fall into `alphanumeric` or `other` categories based on remaining classification rules
+- **Rationale:** Adheres to provided instructions and maintains strict pattern matching consistency
+
+**3. Null Values Treated as Data Quality Anomalies**
+- All **null values in critical fields** (instrument_number, book, page, date) are treated as **data anomalies**, not standard missing records
+- These are explicitly tracked and reported to ensure data completeness issues are flagged during assessment
+- Null counts are reported separately for each field type (e.g., `book_null_count`, `page_null_count`)
+- Date nulls are additionally tracked under the `null_date` anomaly type with example records
+- **Rationale:** Ensures data quality issues are visible and quantifiable in the analysis output
+
+---
+
 ### 1. Pattern Classification Strategy
 
 **Deterministic Precedence (No Overlaps):**
