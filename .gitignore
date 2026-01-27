@@ -1,0 +1,29 @@
+# --- Data for the assessment (very large, do NOT commit) ---
+records/
+records-*.zip
+*.zip
+*.pdf
+nc_records_assessment.jsonl
+
+# --- Project outputs (generated files) ---
+outputs/*
+!outputs/.gitkeep
+
+# --- Python (generated) ---
+__pycache__/
+*.pyc
+
+# --- Virtual environments ---
+.venv/
+venv/
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# --- Environment variables / secrets ---
+.env
+.env.local
