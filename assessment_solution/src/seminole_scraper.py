@@ -65,19 +65,21 @@ class SeminoleScraper:
         self._setup_driver()
         
     def _setup_logging(self) -> logging.Logger:
-        """Configure logging with appropriate format."""
+        """Configure logging with appropriate format (idempotent)."""
         logger = logging.getLogger("SeminoleScraper")
         logger.setLevel(logging.INFO)
+        logger.propagate = False  # avoid duplicate logs from root logger
         
-        # Console handler
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setLevel(logging.INFO)
-        formatter = logging.Formatter(
-            "[%(asctime)s] [%(levelname)s] %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
-        )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+        # Only add handler if none exist (prevents duplicates on multiple instantiations)
+        if not logger.handlers:
+            handler = logging.StreamHandler(sys.stdout)
+            handler.setLevel(logging.INFO)
+            formatter = logging.Formatter(
+                "[%(asctime)s] [%(levelname)s] %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S"
+            )
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
         
         return logger
     
@@ -111,74 +113,274 @@ class SeminoleScraper:
             except Exception as e:
                 self.logger.warning(f"Error closing WebDriver: {e}")
     
-    def _accept_disclaimer_if_present(self):
+    def _with_retries(self, action_name: str, fn):
         """
-        Click 'AGREED & ENTER' button if present (disclaimer gate).
+        Run a callable with retries for transient Selenium/WebDriver errors.
+        Intended for coarse operations like driver.get().
         
-        This is idempotent - if button is not present, it proceeds.
+        Args:
+            action_name: Description of the action for logging
+            fn: Callable to execute with retries
+            
+        Returns:
+            Result of fn()
+            
+        Raises:
+            Last exception if all retries exhausted
+        """
+        last_exc = None
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                return fn()
+            except (WebDriverException, TimeoutException) as e:
+                last_exc = e
+                wait_s = min(2 ** (attempt - 1), 8)  # 1,2,4,8...
+                self.logger.warning(
+                    f"{action_name} failed (attempt {attempt}/{self.MAX_RETRIES}): {e}. "
+                    f"Retrying in {wait_s}s..."
+                )
+                time.sleep(wait_s)
+        
+        # Exhausted retries
+        self.logger.error(f"{action_name} failed after {self.MAX_RETRIES} attempts: {last_exc}")
+        raise last_exc
+    
+    def _safe_click(self, element, description: str):
+        """
+        Safely click an element with scroll and fallback to JS click.
+        
+        Args:
+            element: WebElement to click
+            description: Description for logging
         """
         try:
-            # Use XPath contains() for robust matching
-            button = WebDriverWait(self.driver, 5).until(
-                EC.element_to_be_clickable((
-                    By.XPATH,
-                    "//button[contains(text(), 'AGREED') and contains(text(), 'ENTER')]"
-                ))
+            # Scroll element into view
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({block: 'center', behavior: 'smooth'});",
+                element
             )
-            button.click()
-            self.logger.info("Clicked 'AGREED & ENTER' button")
+            time.sleep(0.5)  # Brief pause after scroll
             
-            # Wait for search form to be present
-            WebDriverWait(self.driver, self.ELEMENT_WAIT_TIMEOUT).until(
-                EC.presence_of_element_located((By.XPATH, "//input[contains(@placeholder, 'Name')]"))
-            )
-            self.logger.info("Search form loaded")
+            # Try normal click
+            element.click()
+            self.logger.debug(f"{description}: normal click succeeded")
             
-        except TimeoutException:
-            # Button not present - already past disclaimer or different flow
-            self.logger.info("No disclaimer button found - proceeding")
         except Exception as e:
-            self.logger.warning(f"Error handling disclaimer: {e}")
+            # Fallback to JavaScript click
+            self.logger.debug(f"{description}: normal click failed ({e}), using JS click")
+            self.driver.execute_script("arguments[0].click();", element)
+            self.logger.debug(f"{description}: JS click succeeded")
+    
+    def _accept_disclaimer_if_present(self):
+        """
+        Click 'AGREED & ENTER' disclaimer link if present (primary → fallback strategy).
+        
+        Strategy:
+        1. Always start in default content
+        2. Try primary selector (CSS + XPath) for <a> element
+        3. If not found, try iframes
+        4. Always return to default content
+        5. Wait for disclaimer to disappear and form to be clickable
+        """
+        # Target: <a class="btn btn-success">Agreed & Enter</a>
+        # XPath: case-insensitive match for "AGREED" and "ENTER" text in <a> element
+        disclaimer_xpath = (
+            "//a[contains(translate(normalize-space(.), "
+            "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'agreed') "
+            "and contains(translate(normalize-space(.), "
+            "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'enter')]"
+        )
+        
+        try:
+            # A. Always start in default content
+            self.driver.switch_to.default_content()
+            
+            # B. Primary attempt: find <a> link in main DOM
+            disclaimer_link = None
+            try:
+                # Try CSS selector first (most specific)
+                try:
+                    disclaimer_link = WebDriverWait(self.driver, 3).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "a.btn.btn-success"))
+                    )
+                    self.logger.info("Found disclaimer link via CSS selector")
+                except TimeoutException:
+                    # Try XPath fallback
+                    disclaimer_link = WebDriverWait(self.driver, 2).until(
+                        EC.presence_of_element_located((By.XPATH, disclaimer_xpath))
+                    )
+                    self.logger.info("Found disclaimer link via XPath")
+                
+                if disclaimer_link:
+                    # Scroll into view (for stability)
+                    self.driver.execute_script(
+                        "arguments[0].scrollIntoView({block: 'center'});", disclaimer_link
+                    )
+                    time.sleep(0.3)
+                    
+                    # Use JavaScript click (bypasses visibility/overlay issues)
+                    self.driver.execute_script("arguments[0].click();", disclaimer_link)
+                    self.logger.info("Clicked disclaimer link in main content (JS click)")
+                    
+                    # Wait for disclaimer to disappear (staleness)
+                    try:
+                        WebDriverWait(self.driver, 5).until(
+                            EC.staleness_of(disclaimer_link)
+                        )
+                        self.logger.info("Disclaimer overlay dismissed")
+                    except TimeoutException:
+                        self.logger.debug("Disclaimer link still present (may be hidden now)")
+                    
+                    # C. Wait for search form to be clickable
+                    WebDriverWait(self.driver, self.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.element_to_be_clickable((By.ID, "criteria_full_name"))
+                    )
+                    self.logger.info("Search form is now clickable")
+                    return  # Success!
+                    
+            except TimeoutException:
+                self.logger.info("Disclaimer link not found in main content")
+            
+            # D. Fallback: try iframes
+            iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+            if iframes:
+                self.logger.info(f"Checking {len(iframes)} iframe(s) for disclaimer...")
+                
+                for idx, iframe in enumerate(iframes):
+                    try:
+                        self.driver.switch_to.frame(iframe)
+                        
+                        # Try CSS first, then XPath
+                        iframe_link = None
+                        try:
+                            iframe_link = WebDriverWait(self.driver, 1).until(
+                                EC.presence_of_element_located((By.CSS_SELECTOR, "a.btn.btn-success"))
+                            )
+                        except TimeoutException:
+                            iframe_link = WebDriverWait(self.driver, 1).until(
+                                EC.presence_of_element_located((By.XPATH, disclaimer_xpath))
+                            )
+                        
+                        if iframe_link:
+                            # Scroll and click with JavaScript
+                            self.driver.execute_script(
+                                "arguments[0].scrollIntoView({block: 'center'});", iframe_link
+                            )
+                            time.sleep(0.3)
+                            self.driver.execute_script("arguments[0].click();", iframe_link)
+                            self.logger.info(f"Clicked disclaimer link in iframe {idx} (JS click)")
+                            
+                            # Return to main content
+                            self.driver.switch_to.default_content()
+                            
+                            # Wait for search form to be clickable
+                            WebDriverWait(self.driver, self.ELEMENT_WAIT_TIMEOUT).until(
+                                EC.element_to_be_clickable((By.ID, "criteria_full_name"))
+                            )
+                            self.logger.info("Search form is now clickable")
+                            return  # Success!
+                        
+                    except TimeoutException:
+                        self.driver.switch_to.default_content()
+                        continue
+            
+            # If we get here, no disclaimer button was found
+            self.logger.info("No disclaimer button found - may already be dismissed or not required")
+            self.driver.switch_to.default_content()
+            
+        except Exception as e:
+            self.logger.error(f"Error handling disclaimer: {e}")
+            
+            # Debug info
+            try:
+                self.logger.info(f"Page title: {self.driver.title}")
+                self.logger.info(f"Current URL: {self.driver.current_url}")
+                iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+                self.logger.info(f"Iframes found: {len(iframes)}")
+                
+                # Save screenshot
+                screenshot_path = Path("outputs") / f"disclaimer_error_{int(time.time())}.png"
+                screenshot_path.parent.mkdir(exist_ok=True)
+                self.driver.save_screenshot(str(screenshot_path))
+                self.logger.error(f"Screenshot saved: {screenshot_path}")
+            except Exception:
+                pass
+            
+            # Always return to default content
+            try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
     
     def _wait_for_results(self) -> bool:
         """
-        Wait for search results grid to load (grid-first strategy).
+        Wait for search results grid to load with strong synchronization.
+        
+        Strategy:
+        1. Wait for loading/processing to start (if detectable)
+        2. Wait for results container to become visible
+        3. Check for results rows OR "no results" message
         
         Returns:
             True if results present, False if no results
         """
         try:
-            # Wait for either results grid or "no results" message
+            # Give the page a moment to start processing the search
+            time.sleep(1)
+            
+            # Wait for results section to be visible (more specific than just any table)
+            # Look for: results container, table with data, OR "no records" message
             WebDriverWait(self.driver, self.ELEMENT_WAIT_TIMEOUT).until(
                 lambda d: (
-                    len(d.find_elements(By.CSS_SELECTOR, "table tbody tr")) > 0
-                    or len(d.find_elements(By.XPATH, "//*[contains(text(), 'No records')]")) > 0
-                    or len(d.find_elements(By.XPATH, "//*[contains(text(), 'no results')]")) > 0
+                    # Check for results grid (table with tbody containing data rows)
+                    len(d.find_elements(By.CSS_SELECTOR, "table tbody tr td")) > 0
+                    # OR check for explicit "no results" messages
+                    or len(d.find_elements(By.XPATH, 
+                        "//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'no record')]"
+                    )) > 0
+                    or len(d.find_elements(By.XPATH,
+                        "//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'no result')]"
+                    )) > 0
+                    # OR check for results header/container
+                    or len(d.find_elements(By.XPATH,
+                        "//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'result')]"
+                    )) > 0
                 )
             )
             
-            # Check if we have results or "no results" message
-            rows = self.driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
-            no_results = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'No records') or contains(text(), 'no results')]")
+            self.logger.info("Search completed - checking for results...")
             
-            if no_results or len(rows) == 0:
-                self.logger.info("No results found")
+            # Check if we have actual data rows
+            data_rows = self.driver.find_elements(By.CSS_SELECTOR, "table tbody tr td")
+            no_results_messages = self.driver.find_elements(
+                By.XPATH,
+                "//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'no record') "
+                "or contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'no result')]"
+            )
+            
+            if no_results_messages or len(data_rows) == 0:
+                self.logger.info("No results found for search")
                 return False
             
-            self.logger.info(f"Results grid loaded with {len(rows)} rows visible")
-            
-            # Best-effort: wait for spinner to disappear
-            try:
-                WebDriverWait(self.driver, 5).until(
-                    EC.invisibility_of_element_located((By.CLASS_NAME, "loading-spinner"))
-                )
-            except TimeoutException:
-                self.logger.debug("Spinner check timed out (grid is present, continuing)")
+            # Count actual data rows (rows with <td> elements)
+            rows_with_data = self.driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
+            self.logger.info(f"Results found: {len(rows_with_data)} rows visible")
             
             return True
             
         except TimeoutException:
-            self.logger.warning("Timeout waiting for results grid")
+            self.logger.error("Timeout waiting for results - page may not have responded to search")
+            
+            # Debug: save screenshot
+            screenshot_path = Path("outputs") / f"results_timeout_{int(time.time())}.png"
+            screenshot_path.parent.mkdir(exist_ok=True)
+            self.driver.save_screenshot(str(screenshot_path))
+            self.logger.error(f"Screenshot saved: {screenshot_path}")
+            
+            return False
+        
+        except Exception as e:
+            self.logger.error(f"Error waiting for results: {type(e).__name__}: {e}")
             return False
     
     def _get_pagination_info(self) -> tuple[int, int]:
@@ -542,33 +744,107 @@ class SeminoleScraper:
         start_time = time.time()
         
         try:
-            # Navigate to site
+            # Navigate to site with retries
             self.logger.info(f"Navigating to {self.BASE_URL}")
-            self.driver.get(self.BASE_URL)
+            self._with_retries("Navigate to BASE_URL", lambda: self.driver.get(self.BASE_URL))
+            
+            # Log page title for debugging
+            self.logger.info(f"Page loaded: {self.driver.title}")
             
             # Accept disclaimer if present
             self._accept_disclaimer_if_present()
             
-            # Find and fill name input
-            name_input = WebDriverWait(self.driver, self.ELEMENT_WAIT_TIMEOUT).until(
-                EC.presence_of_element_located((
-                    By.XPATH,
-                    "//input[contains(@placeholder, 'Name') or contains(@placeholder, 'name')]"
-                ))
+            # Ensure we're in default content before interacting with form
+            self.driver.switch_to.default_content()
+            
+            # Wait for page to be fully loaded
+            WebDriverWait(self.driver, 10).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
             )
+            
+            # Find and fill name input (wait for clickable, not just present)
+            # Use ID selector - more reliable than placeholder
+            try:
+                name_input = WebDriverWait(self.driver, self.ELEMENT_WAIT_TIMEOUT).until(
+                    EC.element_to_be_clickable((By.ID, "criteria_full_name"))
+                )
+            except TimeoutException:
+                # Debug: log what inputs ARE present
+                inputs = self.driver.find_elements(By.TAG_NAME, "input")
+                self.logger.error(f"Name input not found. Found {len(inputs)} input elements:")
+                for idx, inp in enumerate(inputs[:10]):  # Log first 10
+                    inp_type = inp.get_attribute("type")
+                    inp_placeholder = inp.get_attribute("placeholder")
+                    inp_name = inp.get_attribute("name")
+                    inp_id = inp.get_attribute("id")
+                    self.logger.error(f"  Input {idx}: type={inp_type}, placeholder={inp_placeholder}, name={inp_name}, id={inp_id}")
+                
+                # Save screenshot for debugging
+                screenshot_path = Path("outputs") / f"error_screenshot_{int(time.time())}.png"
+                screenshot_path.parent.mkdir(exist_ok=True)
+                self.driver.save_screenshot(str(screenshot_path))
+                self.logger.error(f"Screenshot saved: {screenshot_path}")
+                
+                raise TimeoutException("Could not find name input field. See logs and screenshot for details.")
+            
+            # Scroll into view and ensure interactable
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({block: 'center', behavior: 'smooth'});",
+                name_input
+            )
+            time.sleep(0.3)  # Brief pause after scroll
+            
             name_input.clear()
             name_input.send_keys(name)
             self.logger.info(f"Entered name: {name}")
             
-            # Find and click Search button
-            search_button = self.driver.find_element(
-                By.XPATH,
-                "//button[contains(text(), 'Search') or contains(text(), 'SEARCH')]"
-            )
-            search_button.click()
-            self.logger.info("Clicked Search button")
+            # Find and click SEARCH button (scope to Search Criteria panel, handle <a> elements)
+            try:
+                # First, locate the Search Criteria container
+                search_criteria_panel = self.driver.find_element(
+                    By.XPATH,
+                    "//*[contains(text(), 'Search Criteria') or contains(text(), 'search criteria')]"
+                )
+                
+                # Find SEARCH control within that panel (support both <a> and <button>)
+                # XPath: case-insensitive "search" in <a> or <button> with class 'btn'
+                search_xpath = (
+                    "./ancestor::*[1]/following-sibling::*//*["
+                    "(self::a or self::button or self::input[@type='submit']) "
+                    "and contains(translate(normalize-space(.), "
+                    "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'search')"
+                    "]"
+                )
+                
+                search_button = WebDriverWait(self.driver, 10).until(
+                    lambda d: search_criteria_panel.find_element(By.XPATH, search_xpath)
+                )
+                
+                self.logger.info(f"Found SEARCH control: <{search_button.tag_name}> element")
+                
+                # Scroll into view and use JavaScript click (defensive)
+                self.driver.execute_script(
+                    "arguments[0].scrollIntoView({block: 'center'});", search_button
+                )
+                time.sleep(0.3)
+                
+                # Click with JavaScript (bypasses overlay/intercept issues)
+                self.driver.execute_script("arguments[0].click();", search_button)
+                self.logger.info("Clicked SEARCH button (JS click)")
+                
+            except Exception as e:
+                # Log detailed error and save screenshot
+                self.logger.error(f"Failed to click SEARCH button: {type(e).__name__}: {e}")
+                self.logger.error(f"URL: {self.driver.current_url}")
+                self.logger.error(f"Title: {self.driver.title}")
+                
+                screenshot_path = Path("outputs") / f"search_click_error_{int(time.time())}.png"
+                screenshot_path.parent.mkdir(exist_ok=True)
+                self.driver.save_screenshot(str(screenshot_path))
+                self.logger.error(f"Screenshot saved: {screenshot_path}")
+                raise
             
-            # Wait for results
+            # Wait for results with strong post-click synchronization
             has_results = self._wait_for_results()
             
             if not has_results:

@@ -11,29 +11,27 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Tuple
 
 from seminole_scraper import SeminoleScraper
 
 
-def run_test_case(scraper: SeminoleScraper, name: str) -> Dict[str, Any]:
+def run_test_case(scraper: SeminoleScraper, name: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     """
-    Run a single test case and collect metrics.
+    Run a single test case and collect metrics and records.
     
     Args:
         scraper: SeminoleScraper instance
         name: Name to search
         
     Returns:
-        Test case result dictionary with metrics
+        Tuple of (metrics_dict, records_list)
     """
     print(f"\n{'='*60}")
     print(f"TEST CASE: {name}")
     print(f"{'='*60}")
     
     start_time = time.time()
-    error = None
-    records = []
     
     try:
         records = scraper.search_by_name(name)
@@ -41,13 +39,14 @@ def run_test_case(scraper: SeminoleScraper, name: str) -> Dict[str, Any]:
         
         print(f"✅ Success: {len(records)} records in {duration:.1f}s")
         
-        return {
+        metrics = {
             "search_name": name,
             "record_count": len(records),
             "duration_seconds": round(duration, 1),
             "errors": 0,
             "status": "success"
         }
+        return metrics, records
         
     except Exception as e:
         duration = time.time() - start_time
@@ -55,7 +54,7 @@ def run_test_case(scraper: SeminoleScraper, name: str) -> Dict[str, Any]:
         
         print(f"❌ Failed: {error}")
         
-        return {
+        metrics = {
             "search_name": name,
             "record_count": 0,
             "duration_seconds": round(duration, 1),
@@ -63,6 +62,7 @@ def run_test_case(scraper: SeminoleScraper, name: str) -> Dict[str, Any]:
             "error_message": error,
             "status": "failed"
         }
+        return metrics, []
 
 
 def main():
@@ -86,19 +86,11 @@ def main():
     all_records = []
     
     try:
-        # Run each test case
+        # Run each test case (single scrape per name - no duplicates)
         for name in test_names:
-            result = run_test_case(scraper, name)
-            test_results.append(result)
-            
-            # Collect records from this test
-            if result["status"] == "success" and result["record_count"] > 0:
-                try:
-                    # Re-run to get actual records (test_case only returned metrics)
-                    records = scraper.search_by_name(name)
-                    all_records.extend(records)
-                except Exception:
-                    pass
+            metrics, records = run_test_case(scraper, name)
+            test_results.append(metrics)
+            all_records.extend(records)
         
         # Calculate aggregate performance metrics
         total_records = sum(r["record_count"] for r in test_results)
