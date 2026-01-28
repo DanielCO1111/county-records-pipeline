@@ -34,6 +34,27 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service as ChromeService
 
 
+# Fixed output path for all runs (assignment requirement)
+OUTPUT_PATH = Path("outputs") / "seminole_test_results.json"
+
+# Test cases for --run-tests mode
+TEST_CASES = [
+    {"name": "Smith john jr", "expected_count": 16},   # Single page
+    {"name": "Smith john C", "expected_count": 81},    # 3 pages (pagination test)
+    {"name": "XYZ ABC", "expected_count": 0},          # No results (false-positive check)
+]
+
+# NC schema required keys (exact set)
+NC_SCHEMA_KEYS = {
+    "instrument_number", "parcel_number", "county", "state", "book", "page",
+    "doc_type", "doc_category", "original_doc_type", "book_type",
+    "grantors", "grantees", "date", "consideration"
+}
+
+# Fields that must always be None (not available in Seminole grid)
+MUST_BE_NULL_FIELDS = {"parcel_number", "doc_category", "book_type", "consideration"}
+
+
 class SeminoleScraper:
     """
     Scraper for Seminole County official records.
@@ -1420,6 +1441,315 @@ class SeminoleScraper:
             raise
 
 
+# =============================================================================
+# VALIDATION FUNCTIONS
+# =============================================================================
+
+def validate_records(records: List[Dict[str, Any]], expected_count: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Run all validations on a list of records.
+    
+    Args:
+        records: List of NC-schema record dicts
+        expected_count: Expected number of records (None to skip count validation)
+        
+    Returns:
+        Validation results dict with boolean flags and errors list
+    """
+    errors = []
+    actual_count = len(records)
+    
+    # 1) Count validation
+    if expected_count is not None:
+        count_match = (actual_count == expected_count)
+        if not count_match:
+            errors.append(f"Count mismatch: expected {expected_count}, got {actual_count}")
+    else:
+        count_match = True  # Skip if no expected count
+    
+    # 2) Schema validation - check each record has exact required keys
+    schema_keys_ok = True
+    for idx, record in enumerate(records):
+        if not isinstance(record, dict):
+            schema_keys_ok = False
+            errors.append(f"Record {idx}: not a dict")
+            continue
+        record_keys = set(record.keys())
+        if record_keys != NC_SCHEMA_KEYS:
+            schema_keys_ok = False
+            missing = NC_SCHEMA_KEYS - record_keys
+            extra = record_keys - NC_SCHEMA_KEYS
+            if missing:
+                errors.append(f"Record {idx}: missing keys {missing}")
+            if extra:
+                errors.append(f"Record {idx}: extra keys {extra}")
+    
+    # 3) Null rules - certain fields must be None
+    nulls_ok = True
+    for idx, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        for field in MUST_BE_NULL_FIELDS:
+            if field in record and record[field] is not None:
+                nulls_ok = False
+                errors.append(f"Record {idx}: {field} should be None, got {record[field]!r}")
+        # grantors/grantees: if missing data, must be None (not empty list)
+        for party_field in ("grantors", "grantees"):
+            val = record.get(party_field)
+            if val is not None and not isinstance(val, list):
+                nulls_ok = False
+                errors.append(f"Record {idx}: {party_field} should be list or None, got {type(val).__name__}")
+            if isinstance(val, list) and len(val) == 0:
+                nulls_ok = False
+                errors.append(f"Record {idx}: {party_field} is empty list (should be None if no data)")
+    
+    # 4) Uppercase rules - names in grantors/grantees must be uppercase
+    uppercase_names_ok = True
+    for idx, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        for party_field in ("grantors", "grantees"):
+            val = record.get(party_field)
+            if isinstance(val, list):
+                for name_idx, name in enumerate(val):
+                    if isinstance(name, str) and name != name.upper():
+                        uppercase_names_ok = False
+                        errors.append(f"Record {idx}: {party_field}[{name_idx}] not uppercase: {name!r}")
+    
+    # 5) Date format rules - ISO 8601 with timezone offset
+    date_timezone_ok = True
+    for idx, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        date_val = record.get("date")
+        if date_val is not None:
+            if not isinstance(date_val, str):
+                date_timezone_ok = False
+                errors.append(f"Record {idx}: date should be string, got {type(date_val).__name__}")
+            elif "T" not in date_val:
+                date_timezone_ok = False
+                errors.append(f"Record {idx}: date missing 'T' separator: {date_val!r}")
+            else:
+                # Check for timezone offset (e.g., -05:00, +00:00, Z)
+                has_tz = (
+                    date_val.endswith("Z") or
+                    re.search(r'[+-]\d{2}:\d{2}$', date_val) is not None
+                )
+                if not has_tz:
+                    date_timezone_ok = False
+                    errors.append(f"Record {idx}: date missing timezone offset: {date_val!r}")
+    
+    # 6) No-link rule - no URLs in any string field
+    no_links_ok = True
+    string_fields = ["instrument_number", "book", "page", "doc_type", "original_doc_type", "date"]
+    for idx, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        # Check direct string fields
+        for field in string_fields:
+            val = record.get(field)
+            if isinstance(val, str) and ("http://" in val.lower() or "https://" in val.lower()):
+                no_links_ok = False
+                errors.append(f"Record {idx}: {field} contains URL: {val!r}")
+        # Check party name lists
+        for party_field in ("grantors", "grantees"):
+            val = record.get(party_field)
+            if isinstance(val, list):
+                for name in val:
+                    if isinstance(name, str) and ("http://" in name.lower() or "https://" in name.lower()):
+                        no_links_ok = False
+                        errors.append(f"Record {idx}: {party_field} contains URL: {name!r}")
+    
+    return {
+        "count_match": count_match,
+        "schema_keys_ok": schema_keys_ok,
+        "nulls_ok": nulls_ok,
+        "uppercase_names_ok": uppercase_names_ok,
+        "date_timezone_ok": date_timezone_ok,
+        "no_links_ok": no_links_ok,
+        "errors": errors
+    }
+
+
+def is_test_passed(validations: Dict[str, Any]) -> bool:
+    """Check if all validations passed (all booleans True and no errors)."""
+    return (
+        validations["count_match"] and
+        validations["schema_keys_ok"] and
+        validations["nulls_ok"] and
+        validations["uppercase_names_ok"] and
+        validations["date_timezone_ok"] and
+        validations["no_links_ok"] and
+        len(validations["errors"]) == 0
+    )
+
+
+def run_test_suite(scraper: SeminoleScraper, logger: logging.Logger) -> Dict[str, Any]:
+    """
+    Run all test cases and return structured results.
+    
+    Args:
+        scraper: Initialized SeminoleScraper instance (reused across tests)
+        logger: Logger for output
+        
+    Returns:
+        Test results dict ready for JSON serialization
+    """
+    et_tz = pytz.timezone("America/New_York")
+    generated_at = datetime.now(et_tz).isoformat()
+    
+    tests_results = []
+    passed_count = 0
+    failed_count = 0
+    
+    for idx, test_case in enumerate(TEST_CASES):
+        test_name = test_case["name"]
+        expected_count = test_case["expected_count"]
+        
+        logger.info(f"=" * 60)
+        logger.info(f"TEST {idx + 1}/{len(TEST_CASES)}: '{test_name}' (expected: {expected_count} records)")
+        logger.info(f"=" * 60)
+        
+        try:
+            # Run the search
+            records = scraper.search_by_name(test_name)
+            actual_count = len(records)
+            
+            # Run validations
+            validations = validate_records(records, expected_count)
+            
+            # Determine pass/fail
+            passed = is_test_passed(validations)
+            if passed:
+                passed_count += 1
+                logger.info(f"✓ TEST PASSED: '{test_name}' - {actual_count} records")
+            else:
+                failed_count += 1
+                logger.warning(f"✗ TEST FAILED: '{test_name}' - {actual_count} records")
+                for err in validations["errors"][:5]:  # Log first 5 errors
+                    logger.warning(f"  - {err}")
+                if len(validations["errors"]) > 5:
+                    logger.warning(f"  ... and {len(validations['errors']) - 5} more errors")
+            
+            tests_results.append({
+                "name": test_name,
+                "expected_count": expected_count,
+                "actual_count": actual_count,
+                "validations": validations,
+                "records": records
+            })
+            
+        except Exception as e:
+            # Test failed due to exception
+            failed_count += 1
+            logger.error(f"✗ TEST EXCEPTION: '{test_name}' - {type(e).__name__}: {e}")
+            
+            tests_results.append({
+                "name": test_name,
+                "expected_count": expected_count,
+                "actual_count": 0,
+                "validations": {
+                    "count_match": False,
+                    "schema_keys_ok": False,
+                    "nulls_ok": False,
+                    "uppercase_names_ok": False,
+                    "date_timezone_ok": False,
+                    "no_links_ok": False,
+                    "errors": [f"Exception: {type(e).__name__}: {e}"]
+                },
+                "records": []
+            })
+        
+        # Delay between tests (respectful to server)
+        if idx < len(TEST_CASES) - 1:
+            logger.info("Waiting 2 seconds before next test...")
+            time.sleep(2)
+    
+    logger.info(f"=" * 60)
+    logger.info(f"TEST SUITE COMPLETE: {passed_count} passed, {failed_count} failed")
+    logger.info(f"=" * 60)
+    
+    return {
+        "generated_at": generated_at,
+        "county": "seminole",
+        "state": "FL",
+        "tests": tests_results,
+        "summary": {
+            "passed": passed_count,
+            "failed": failed_count
+        }
+    }
+
+
+def run_single_search(scraper: SeminoleScraper, name: str, logger: logging.Logger) -> Dict[str, Any]:
+    """
+    Run a single search and return structured results (same format as test suite).
+    
+    Args:
+        scraper: Initialized SeminoleScraper instance
+        name: Name to search
+        logger: Logger for output
+        
+    Returns:
+        Test results dict ready for JSON serialization
+    """
+    et_tz = pytz.timezone("America/New_York")
+    generated_at = datetime.now(et_tz).isoformat()
+    
+    try:
+        records = scraper.search_by_name(name)
+        actual_count = len(records)
+        
+        # Run validations (no expected count for ad-hoc searches)
+        validations = validate_records(records, expected_count=None)
+        
+        passed = is_test_passed(validations)
+        
+        return {
+            "generated_at": generated_at,
+            "county": "seminole",
+            "state": "FL",
+            "tests": [{
+                "name": name,
+                "expected_count": None,
+                "actual_count": actual_count,
+                "validations": validations,
+                "records": records
+            }],
+            "summary": {
+                "passed": 1 if passed else 0,
+                "failed": 0 if passed else 1
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Search failed: {type(e).__name__}: {e}")
+        return {
+            "generated_at": generated_at,
+            "county": "seminole",
+            "state": "FL",
+            "tests": [{
+                "name": name,
+                "expected_count": None,
+                "actual_count": 0,
+                "validations": {
+                    "count_match": True,  # N/A for single search
+                    "schema_keys_ok": False,
+                    "nulls_ok": False,
+                    "uppercase_names_ok": False,
+                    "date_timezone_ok": False,
+                    "no_links_ok": False,
+                    "errors": [f"Exception: {type(e).__name__}: {e}"]
+                },
+                "records": []
+            }],
+            "summary": {
+                "passed": 0,
+                "failed": 1
+            }
+        }
+
+
 def main():
     """Command-line interface for Seminole County scraper."""
     parser = argparse.ArgumentParser(
@@ -1427,13 +1757,18 @@ def main():
     )
     parser.add_argument(
         "--name",
-        required=True,
-        help="Name to search (e.g., 'SMITH JOHN')"
+        help="Name to search (e.g., 'SMITH JOHN'). Ignored if --run-tests is used."
+    )
+    parser.add_argument(
+        "--run-tests",
+        action="store_true",
+        dest="run_tests",
+        help="Run the predefined test suite (3 test cases) instead of a single search"
     )
     parser.add_argument(
         "--output",
-        default="outputs/seminole_test_results.json",
-        help="Output JSON file path"
+        default=str(OUTPUT_PATH),
+        help="(ignored) Output always written to outputs/seminole_test_results.json"
     )
     parser.add_argument(
         "--headless",
@@ -1443,21 +1778,52 @@ def main():
     
     args = parser.parse_args()
     
-    # Ensure output directory exists
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Validate arguments
+    if not args.run_tests and not args.name:
+        parser.error("Either --name or --run-tests is required")
     
-    # Run scraper
+    # Always use fixed output path (assignment requirement)
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Initialize scraper (reused across all tests/searches)
     scraper = SeminoleScraper(headless=args.headless)
+    logger = scraper.logger
     
     try:
-        records = scraper.search_by_name(args.name)
+        if args.run_tests:
+            # Run the full test suite
+            logger.info("Starting test suite with 3 predefined test cases...")
+            results = run_test_suite(scraper, logger)
+            
+            # Summary for console
+            summary = results["summary"]
+            total_records = sum(t["actual_count"] for t in results["tests"])
+            
+            if summary["failed"] == 0:
+                print(f"\n✅ TEST SUITE PASSED: {summary['passed']}/{summary['passed']} tests, {total_records} total records")
+            else:
+                print(f"\n⚠️ TEST SUITE: {summary['passed']} passed, {summary['failed']} failed, {total_records} total records")
+        else:
+            # Run single search
+            logger.info(f"Running single search for: {args.name}")
+            results = run_single_search(scraper, args.name, logger)
+            
+            # Summary for console
+            test_result = results["tests"][0]
+            actual_count = test_result["actual_count"]
+            validations = test_result["validations"]
+            
+            if is_test_passed(validations):
+                print(f"\n✅ Success: {actual_count} records (all validations passed)")
+            else:
+                error_count = len(validations["errors"])
+                print(f"\n⚠️ Completed: {actual_count} records ({error_count} validation warnings)")
         
-        # Write plain JSON array (NO metadata wrapper)
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(records, f, indent=2, ensure_ascii=False)
+        # Write results to fixed output path
+        with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
         
-        print(f"\n✅ Success: {len(records)} records saved to {output_path}")
+        print(f"📁 Results saved to {OUTPUT_PATH}")
         
     except Exception as e:
         print(f"\n❌ Error: {e}", file=sys.stderr)

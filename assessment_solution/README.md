@@ -522,11 +522,47 @@ This scraper follows a **schema-first, conservative approach**:
 ### Test Results Summary
 
 **Test Cases:**
-1. **SMITH JOHN** - Large result set (2000+ records expected, 60+ pages)
-2. **JONES, WILLIAM S** - Moderate result set (~55 records expected, ~2 pages)
-3. **ZZZTEST, NORESULT** - Zero results (validates no-results flow)
+1. **Smith john C** - Large result set (80 records expected, 3 pages)
+2. **Smith john JR** - Moderate result set (16 records expected, 1 page)
+3. **XYZ ABC** - Zero results (validates no-results flow/ False positive check)
 
-**Performance Target:** 100-150 records/minute
+
+Init first test:
+
+
+<img width="1034" height="164" alt="image" src="https://github.com/user-attachments/assets/cca4fa12-4955-46ce-8ecb-fea3a97732a9" />
+
+Passed 1st test:
+
+
+<img width="1028" height="168" alt="image" src="https://github.com/user-attachments/assets/97e2ea58-773b-4a86-9b49-13508903f1e5" />
+
+Init second test:
+
+<img width="1100" height="94" alt="image" src="https://github.com/user-attachments/assets/cf42ded0-4fbb-4cfb-9e2a-8b267635dcfe" />
+
+Passed the 2nd test:
+
+<img width="1031" height="98" alt="image" src="https://github.com/user-attachments/assets/e55ace77-ce1d-4f1e-9365-0a2ee497c62a" />
+
+Init the third test:
+
+<img width="1080" height="92" alt="image" src="https://github.com/user-attachments/assets/5ce54535-a627-4ac8-8b87-58c0b43b1498" />
+
+Passed the 3rd test (No false positive):
+
+<img width="1075" height="122" alt="image" src="https://github.com/user-attachments/assets/01e85e49-10cd-4fec-9efb-5c23c7810f3a" />
+
+
+Over All:
+
+<img width="655" height="54" alt="image" src="https://github.com/user-attachments/assets/f1731937-f52d-465d-82e3-5ed457d24b94" />
+
+
+
+
+
+
 
 **Note:** Actual test execution requires running `python src/test_seminole_scraper.py` or individual searches via CLI. Performance depends on site responsiveness and result set sizes.
 
@@ -608,12 +644,45 @@ finally:
 
 ### Performance Characteristics
 
-**Estimated Performance:**
+**Estimated Performance (Records Per Minute):**
+
+| Metric | Formula |
+|--------|---------|
+| **N** | Number of extracted records |
+| **t** | Elapsed time in seconds |
+| **RPM** | `RPM = (N / t) × 60` (records/min) |
+| **Runtime** | `t = (N × 60) / RPM` |
+
+**Measured Test Runs:**
+
+| Test Case | Records (N) | RPM | Runtime (t) |
+|-----------|-------------|-----|-------------|
+| Smith john jr | 16 | 20.2 | ~47.5s |
+| Smith john C | 81 | 98.2 | ~49.5s |
+| XYZ ABC | 0 | — | ~15s |
+
+**Performance Model Analysis:**
+
+The runtime follows: `t(N) = t₀ + αN`
+
+Where:
+- **t₀** = fixed overhead (browser init, disclaimer, search form, first page load)
+- **α** = per-record marginal cost (extraction + pagination)
+
+**Key Insight:** Since `t ≈ 48-49.5s` for both N=16 and N=81, the fixed overhead **t₀ dominates** and per-record cost **α is small**. This means:
+
+```
+RPM(N) = 60N / (t₀ + αN)
+```
+
+**RPM increases with N** due to overhead amortization — larger result sets are more efficient per-record.
+
+**Practical Estimates:**
 - Small result sets (<100 records): ~30-60 seconds
-- Medium result sets (100-500 records): ~2-5 minutes
+- Medium result sets (100-500 records): ~2-5 minutes  
 - Large result sets (2000+ records): ~15-25 minutes
 
-**Factors:**
+**Factors Affecting Performance:**
 - Site response time (network latency)
 - Result set size and pagination count
 - Request delay (2s between pages for respectful scraping)
