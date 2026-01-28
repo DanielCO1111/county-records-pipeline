@@ -10,6 +10,7 @@ Website: https://recording.seminoleclerk.org/DuProcessWebInquiry/index.html
 import argparse
 import json
 import logging
+import os
 import re
 import sys
 import time
@@ -50,6 +51,9 @@ class SeminoleScraper:
     TOTAL_RUNTIME_LIMIT = 3600  # 1 hour max
     ELEMENT_WAIT_TIMEOUT = 30  # Seconds for element waits
     MAX_RETRIES = 3  # Network failure retries
+    
+    # Debug artifacts: set to True or set env var SEMINOLE_DEBUG_ARTIFACTS=1 to save screenshots on errors
+    DEBUG_ARTIFACTS = False
     
     # Eastern Time timezone for date conversion
     ET_TIMEZONE = pytz.timezone("America/New_York")
@@ -114,6 +118,28 @@ class SeminoleScraper:
                 self.logger.info("WebDriver closed")
             except Exception as e:
                 self.logger.warning(f"Error closing WebDriver: {e}")
+    
+    def _should_save_debug_artifacts(self) -> bool:
+        """Check if debug artifacts (screenshots) should be saved."""
+        return self.DEBUG_ARTIFACTS or os.environ.get("SEMINOLE_DEBUG_ARTIFACTS", "").lower() in ("1", "true", "yes")
+    
+    def _maybe_screenshot(self, tag: str) -> None:
+        """
+        Save a debug screenshot if DEBUG_ARTIFACTS is enabled.
+        
+        Args:
+            tag: Descriptive tag for the screenshot filename (e.g., "pagination_fail")
+        """
+        if not self._should_save_debug_artifacts():
+            return
+        
+        try:
+            screenshot_path = Path("outputs") / f"{tag}_{int(time.time())}.png"
+            screenshot_path.parent.mkdir(exist_ok=True)
+            self.driver.save_screenshot(str(screenshot_path))
+            self.logger.info(f"Debug screenshot saved: {screenshot_path}")
+        except Exception as e:
+            self.logger.debug(f"Could not save debug screenshot: {e}")
     
     def _with_retries(self, action_name: str, fn):
         """
@@ -299,12 +325,7 @@ class SeminoleScraper:
                 self.logger.info(f"Current URL: {self.driver.current_url}")
                 iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
                 self.logger.info(f"Iframes found: {len(iframes)}")
-                
-                # Save screenshot
-                screenshot_path = Path("outputs") / f"disclaimer_error_{int(time.time())}.png"
-                screenshot_path.parent.mkdir(exist_ok=True)
-                self.driver.save_screenshot(str(screenshot_path))
-                self.logger.error(f"Screenshot saved: {screenshot_path}")
+                self._maybe_screenshot("disclaimer_error")
             except Exception:
                 pass
             
@@ -395,7 +416,7 @@ class SeminoleScraper:
             return True
             
         except TimeoutException:
-            self.logger.error("Timeout waiting for igGrid pager label")
+            self.logger.error("Timeout waiting for igGrid")
             
             # Debug snapshot
             try:
@@ -419,38 +440,7 @@ class SeminoleScraper:
             except Exception:
                 pass
             
-            # Save screenshot
-            screenshot_path = Path("outputs") / f"pager_timeout_{int(time.time())}.png"
-            screenshot_path.parent.mkdir(exist_ok=True)
-            self.driver.save_screenshot(str(screenshot_path))
-            self.logger.error(f"Screenshot saved: {screenshot_path}")
-            
-            return False
-        
-        except Exception as e:
-            self.logger.error(f"Error waiting for igGrid: {type(e).__name__}: {e}")
-            return False
-            
-        except TimeoutException:
-            self.logger.error("Timeout waiting for igGrid results")
-            
-            # Debug info
-            try:
-                record_count = self.driver.find_elements(By.XPATH, 
-                    "//*[contains(text(), 'record') or contains(text(), 'Record')]")
-                record_text = record_count[0].text if record_count else "N/A"
-                self.logger.error(f"Record count text: {record_text}")
-                self.logger.error(f"URL: {self.driver.current_url}")
-                self.logger.error(f"Title: {self.driver.title}")
-            except Exception:
-                pass
-            
-            # Save screenshot
-            screenshot_path = Path("outputs") / f"iggrid_timeout_{int(time.time())}.png"
-            screenshot_path.parent.mkdir(exist_ok=True)
-            self.driver.save_screenshot(str(screenshot_path))
-            self.logger.error(f"Screenshot saved: {screenshot_path}")
-            
+            self._maybe_screenshot("iggrid_timeout")
             return False
         
         except Exception as e:
@@ -626,10 +616,7 @@ class SeminoleScraper:
                         if any(char.isdigit() and char != '0' for char in record_text):
                             # Non-zero record count but no rows extracted
                             self.logger.warning(f"Record count shows data but extracted 0 rows: '{record_text}'")
-                            screenshot_path = Path("outputs") / f"extraction_mismatch_{int(time.time())}.png"
-                            screenshot_path.parent.mkdir(exist_ok=True)
-                            self.driver.save_screenshot(str(screenshot_path))
-                            self.logger.warning(f"Screenshot saved: {screenshot_path}")
+                            self._maybe_screenshot("extraction_mismatch")
                 except Exception:
                     pass
             
@@ -942,15 +929,7 @@ class SeminoleScraper:
                     f"All 6 pagination methods failed! "
                     f"pager_before='{pager_before}', pager_current='{pager_current}'"
                 )
-                
-                # Take screenshot for debugging
-                try:
-                    screenshot_path = f"outputs/pagination_fail_{int(time.time())}.png"
-                    self.driver.save_screenshot(screenshot_path)
-                    self.logger.error(f"Screenshot saved: {screenshot_path}")
-                except Exception:
-                    pass
-                
+                self._maybe_screenshot("pagination_fail")
                 return False
             
             # Log successful pager change
@@ -1281,11 +1260,8 @@ class SeminoleScraper:
                     EC.element_to_be_clickable((By.ID, "criteria_full_name"))
                 )
             except TimeoutException:
-                # Debug: save screenshot
-                screenshot_path = Path("outputs") / f"name_input_not_found_{int(time.time())}.png"
-                screenshot_path.parent.mkdir(exist_ok=True)
-                self.driver.save_screenshot(str(screenshot_path))
-                self.logger.error(f"Name input not found. Screenshot: {screenshot_path}")
+                self.logger.error("Name input not found (id=criteria_full_name)")
+                self._maybe_screenshot("name_input_not_found")
                 raise TimeoutException("Could not find name input field (id=criteria_full_name)")
             
             # Scroll into view
@@ -1348,15 +1324,11 @@ class SeminoleScraper:
                 self.logger.info("Clicked SEARCH button (JS click)")
                 
             except Exception as e:
-                # Log detailed error and save screenshot
+                # Log detailed error
                 self.logger.error(f"Failed to click SEARCH button: {type(e).__name__}: {e}")
                 self.logger.error(f"URL: {self.driver.current_url}")
                 self.logger.error(f"Title: {self.driver.title}")
-                
-                screenshot_path = Path("outputs") / f"search_click_error_{int(time.time())}.png"
-                screenshot_path.parent.mkdir(exist_ok=True)
-                self.driver.save_screenshot(str(screenshot_path))
-                self.logger.error(f"Screenshot saved: {screenshot_path}")
+                self._maybe_screenshot("search_click_error")
                 raise
             
             # Wait for results with strong post-click synchronization
