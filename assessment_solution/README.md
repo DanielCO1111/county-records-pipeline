@@ -522,11 +522,47 @@ This scraper follows a **schema-first, conservative approach**:
 ### Test Results Summary
 
 **Test Cases:**
-1. **SMITH JOHN** - Large result set (2000+ records expected, 60+ pages)
-2. **JONES, WILLIAM S** - Moderate result set (~55 records expected, ~2 pages)
-3. **ZZZTEST, NORESULT** - Zero results (validates no-results flow)
+1. **Smith john C** - Large result set (80 records expected, 3 pages)
+2. **Smith john JR** - Moderate result set (16 records expected, 1 page)
+3. **XYZ ABC** - Zero results (validates no-results flow/ False positive check)
 
-**Performance Target:** 100-150 records/minute
+
+Init first test:
+
+
+<img width="1034" height="164" alt="image" src="https://github.com/user-attachments/assets/cca4fa12-4955-46ce-8ecb-fea3a97732a9" />
+
+Passed 1st test:
+
+
+<img width="1028" height="168" alt="image" src="https://github.com/user-attachments/assets/97e2ea58-773b-4a86-9b49-13508903f1e5" />
+
+Init second test:
+
+<img width="1100" height="94" alt="image" src="https://github.com/user-attachments/assets/cf42ded0-4fbb-4cfb-9e2a-8b267635dcfe" />
+
+Passed the 2nd test:
+
+<img width="1031" height="98" alt="image" src="https://github.com/user-attachments/assets/e55ace77-ce1d-4f1e-9365-0a2ee497c62a" />
+
+Init the third test:
+
+<img width="1080" height="92" alt="image" src="https://github.com/user-attachments/assets/5ce54535-a627-4ac8-8b87-58c0b43b1498" />
+
+Passed the 3rd test (No false positive):
+
+<img width="1075" height="122" alt="image" src="https://github.com/user-attachments/assets/01e85e49-10cd-4fec-9efb-5c23c7810f3a" />
+
+
+Over All:
+
+<img width="655" height="54" alt="image" src="https://github.com/user-attachments/assets/f1731937-f52d-465d-82e3-5ed457d24b94" />
+
+
+
+
+
+
 
 **Note:** Actual test execution requires running `python src/test_seminole_scraper.py` or individual searches via CLI. Performance depends on site responsiveness and result set sizes.
 
