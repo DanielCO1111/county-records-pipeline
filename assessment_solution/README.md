@@ -66,27 +66,26 @@ assessment_solution/
 All Python dependencies are listed in `requirements.txt`:
 
 ```txt
-# Task 1 (Pattern Analyzer) - mostly unused, kept for compatibility
-pandas          # Data manipulation
-python-dateutil # Date parsing (used in Task 2)
-tqdm            # Progress bars
+# Task 2 (Seminole Scraper) - REQUIRED
+selenium          # Browser automation for dynamic websites
+webdriver-manager # Automatic ChromeDriver management
+pytz              # Timezone handling for ET/EST conversions
+python-dateutil   # Date parsing
 
-# Task 2 (Seminole Scraper) - required dependencies
-selenium        # Browser automation for dynamic websites
-webdriver-manager # Automatic WebDriver management
-pytz            # Timezone handling for ET/EST conversions
-
-# Development tools
-requests        # HTTP requests
-beautifulsoup4  # HTML parsing
-lxml            # XML processing
-black           # Code formatter
-ruff            # Python linter
+# Optional / Development only (NOT required for Tasks 1-2)
+pandas            # Data manipulation (optional)
+tqdm              # Progress bars (optional)
+requests          # HTTP requests (dev exploration only)
+beautifulsoup4    # HTML parsing (dev exploration only)
+lxml              # XML processing (dev exploration only)
+black             # Code formatter (dev)
+ruff              # Python linter (dev)
 ```
 
 **Note:** 
 - Task 1 (`pattern_analyzer.py`) uses only Python standard library
-- Task 2 (`seminole_scraper.py`) requires Selenium for interacting with the dynamic DuProcess grid
+- Task 2 (`seminole_scraper.py`) requires only: `selenium`, `webdriver-manager`, `pytz`, `python-dateutil`
+- Other packages are optional/dev-only and not used by the submission scripts
 
 ### Data Requirements
 
@@ -512,7 +511,7 @@ This scraper follows a **schema-first, conservative approach**:
 
 | Edge Case | Handling Strategy | Implementation |
 |-----------|------------------|----------------|
-| **No results** | Return empty array `[]` | Check for "No records" message or empty grid |
+| **No results** | Wrapper with `tests[0].records = []`, `actual_count = 0` | Check for "No records" message or empty grid |
 | **Network failures** | Retry with exponential backoff | Max 3 retries per operation |
 | **Timeouts** | Per-page (60s) and total (1 hour) limits | Log clearly when limits trigger |
 | **Missing fields** | Use `null` (not empty string/list) | Strict null assignment for unavailable data |
@@ -537,37 +536,7 @@ This scraper follows a **schema-first, conservative approach**:
 - Date format (ISO 8601 with timezone offset)
 - No URLs in data (document links not retrieved)
 
-**Test Execution Screenshots:**
-
-Init first test:
-
-<img width="1034" height="164" alt="image" src="https://github.com/user-attachments/assets/cca4fa12-4955-46ce-8ecb-fea3a97732a9" />
-
-Passed 1st test:
-
-<img width="1028" height="168" alt="image" src="https://github.com/user-attachments/assets/97e2ea58-773b-4a86-9b49-13508903f1e5" />
-
-Init second test:
-
-<img width="1100" height="94" alt="image" src="https://github.com/user-attachments/assets/cf42ded0-4fbb-4cfb-9e2a-8b267635dcfe" />
-
-Passed the 2nd test:
-
-<img width="1031" height="98" alt="image" src="https://github.com/user-attachments/assets/e55ace77-ce1d-4f1e-9365-0a2ee497c62a" />
-
-Init the third test:
-
-<img width="1080" height="92" alt="image" src="https://github.com/user-attachments/assets/5ce54535-a627-4ac8-8b87-58c0b43b1498" />
-
-Passed the 3rd test (No false positive):
-
-<img width="1075" height="122" alt="image" src="https://github.com/user-attachments/assets/01e85e49-10cd-4fec-9efb-5c23c7810f3a" />
-
-Overall:
-
-<img width="655" height="54" alt="image" src="https://github.com/user-attachments/assets/f1731937-f52d-465d-82e3-5ed457d24b94" />
-
-
+Execution progress is visible via stdout logs (no additional output files).
 
 **Run the test suite:**
 ```bash
@@ -597,19 +566,20 @@ python src/seminole_scraper.py --run-tests --headless
 
 #### Python API
 
+The recommended usage is via CLI, which always writes the wrapper JSON to `outputs/seminole_test_results.json`. The scraper internally extracts NC-schema records from the Seminole County grid.
+
 ```python
+# Direct API usage (advanced):
 from seminole_scraper import SeminoleScraper
 
-# Initialize scraper
 scraper = SeminoleScraper(headless=True)
-
 try:
-    # Search by name - returns List[Dict] of NC-schema objects
-    records = scraper.search_by_name("SMITH JOHN")
-    print(f"Found {len(records)} records")
+    records = scraper.search_by_name("SMITH JOHN")  # internal extraction
 finally:
     scraper.close()
 ```
+
+> **Note:** For evaluation, use the CLI (`--name` or `--run-tests`) which produces the standardized wrapper output.
 
 ### Output Format (Single Output File)
 
@@ -625,7 +595,7 @@ finally:
 
 ---
 
-#### Example A: Single Search Mode (`--name "SMITH JOHN"`)
+#### Example A: Single Search Mode (`--name "SMITH BROWN"`)
 
 ```json
 {
@@ -634,9 +604,9 @@ finally:
   "state": "FL",
   "tests": [
     {
-      "name": "SMITH JOHN",
+      "name": "SMITH BROWN",
       "expected_count": null,
-      "actual_count": 42,
+      "actual_count": 1,
       "validations": {
         "count_match": true,
         "schema_keys_ok": true,
@@ -646,7 +616,7 @@ finally:
         "no_links_ok": true,
         "errors": []
       },
-      "records": [ /* 42 NC-schema record objects */ ]
+      "records": [ /* 1 NC-schema record object */ ]
     }
   ],
   "summary": { "passed": 1, "failed": 0 }
@@ -655,6 +625,8 @@ finally:
 
 - `tests` array contains **1 entry**
 - `expected_count` is `null` (no predefined expectation for ad-hoc searches)
+
+> **Validation note:** When `expected_count` is `null` (ad-hoc single searches), `count_match` is treated as N/A and reported as `true` to indicate no expectation-based failure occurred.
 
 ---
 
@@ -725,16 +697,12 @@ We extract all columns needed to populate the NC schema fields. Columns without 
 - Includes: navigation, disclaimer handling, form fill, search click, grid ready, per-page pager status, pagination transitions, extracted counts, retries/timeouts, final RPM
 - Log format: `[YYYY-MM-DD HH:MM:SS] [LEVEL] message`
 
-**Debug Screenshots:**
-- By default, **NO screenshots or extra files** are written
-- Screenshots are disabled unless explicitly enabled via:
-  - Class attribute: `DEBUG_ARTIFACTS = True`
-  - Environment variable: `SEMINOLE_DEBUG_ARTIFACTS=1`
-- When enabled, debug screenshots are saved to `outputs/` on errors only
+**Debug Artifacts:**
+- No debug artifacts are written by default
 
 **Single Output File:**
 - The **only** output artifact is `outputs/seminole_test_results.json`
-- No supplementary files (e.g., no separate test_summary.json)
+- No supplementary files (e.g., no separate test_summary.json, no screenshots)
 
 ### Dependencies
 
@@ -750,6 +718,8 @@ We extract all columns needed to populate the NC schema fields. Columns without 
 - Tested on Windows/Linux/macOS
 
 ### Performance Characteristics
+
+> **Disclaimer:** All timings and RPM values below are example measurements from test runs. Actual performance will vary based on site response time, network latency, and system resources.
 
 **Estimated Performance (Records Per Minute):**
 
