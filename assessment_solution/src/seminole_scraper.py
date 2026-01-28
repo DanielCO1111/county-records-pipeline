@@ -10,6 +10,7 @@ Website: https://recording.seminoleclerk.org/DuProcessWebInquiry/index.html
 import argparse
 import json
 import logging
+import re
 import sys
 import time
 from datetime import datetime
@@ -314,65 +315,89 @@ class SeminoleScraper:
     
     def _wait_for_results(self) -> bool:
         """
-        Wait for search results grid to load with strong synchronization.
+        Wait for igGrid results to load (Infragistics jQuery grid).
         
         Strategy:
-        1. Wait for loading/processing to start (if detectable)
-        2. Wait for results container to become visible
-        3. Check for results rows OR "no results" message
+        1. Wait for #grid_container to exist
+        2. Wait for #grid_pager_label to exist (definitive igGrid pager)
+        3. Parse record count from pager label text
+        4. Return True if total > 0, False if total == 0
         
         Returns:
             True if results present, False if no results
         """
         try:
-            # Give the page a moment to start processing the search
+            # Give the page a moment to start processing
             time.sleep(1)
             
-            # Wait for results section to be visible (more specific than just any table)
-            # Look for: results container, table with data, OR "no records" message
+            # Wait for igGrid container
             WebDriverWait(self.driver, self.ELEMENT_WAIT_TIMEOUT).until(
-                lambda d: (
-                    # Check for results grid (table with tbody containing data rows)
-                    len(d.find_elements(By.CSS_SELECTOR, "table tbody tr td")) > 0
-                    # OR check for explicit "no results" messages
-                    or len(d.find_elements(By.XPATH, 
-                        "//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'no record')]"
-                    )) > 0
-                    or len(d.find_elements(By.XPATH,
-                        "//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'no result')]"
-                    )) > 0
-                    # OR check for results header/container
-                    or len(d.find_elements(By.XPATH,
-                        "//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'result')]"
-                    )) > 0
-                )
+                EC.presence_of_element_located((By.ID, "grid_container"))
+            )
+            self.logger.info("igGrid container loaded")
+            
+            # Wait for igGrid pager label (contains "X - Y of Z records")
+            pager_label = WebDriverWait(self.driver, self.ELEMENT_WAIT_TIMEOUT).until(
+                EC.presence_of_element_located((By.ID, "grid_pager_label"))
             )
             
-            self.logger.info("Search completed - checking for results...")
+            # Wait a moment for text to populate
+            time.sleep(1.5)
             
-            # Check if we have actual data rows
-            data_rows = self.driver.find_elements(By.CSS_SELECTOR, "table tbody tr td")
-            no_results_messages = self.driver.find_elements(
-                By.XPATH,
-                "//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'no record') "
-                "or contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'no result')]"
-            )
+            # Read and parse record count
+            pager_text = pager_label.text.strip()
+            self.logger.info(f"igGrid pager text: '{pager_text}'")
             
-            if no_results_messages or len(data_rows) == 0:
-                self.logger.info("No results found for search")
-                return False
+            # Parse "X - Y of Z records" format
+            match = re.search(r'^\s*\d+\s*-\s*\d+\s+of\s+(\d+)\s+records?\s*$', pager_text, re.IGNORECASE)
             
-            # Count actual data rows (rows with <td> elements)
-            rows_with_data = self.driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
-            self.logger.info(f"Results found: {len(rows_with_data)} rows visible")
-            
-            return True
+            if match:
+                total_records = int(match.group(1))
+                self.logger.info(f"Parsed total records: {total_records}")
+                
+                if total_records == 0:
+                    self.logger.info("No results found (pager shows 0 records)")
+                    return False
+                else:
+                    self.logger.info(f"Results found: {total_records} total records")
+                    return True
+            else:
+                # Couldn't parse - check if pager text indicates no results
+                if "0" in pager_text and "record" in pager_text.lower():
+                    self.logger.info(f"No results (pager text: '{pager_text}')")
+                    return False
+                else:
+                    # Assume has results if pager exists with non-zero text
+                    self.logger.warning(f"Could not parse pager text: '{pager_text}' - assuming results exist")
+                    return True
             
         except TimeoutException:
-            self.logger.error("Timeout waiting for results - page may not have responded to search")
+            self.logger.error("Timeout waiting for igGrid pager label")
             
-            # Debug: save screenshot
-            screenshot_path = Path("outputs") / f"results_timeout_{int(time.time())}.png"
+            # Debug snapshot
+            try:
+                self.logger.error(f"URL: {self.driver.current_url}")
+                self.logger.error(f"Title: {self.driver.title}")
+                
+                # Check what elements with "record" text exist
+                record_els = self.driver.find_elements(By.XPATH, 
+                    "//*[contains(text(), 'record') or contains(text(), 'Record')]")
+                self.logger.error(f"Found {len(record_els)} elements with 'record' text")
+                
+                # Try to find pager container
+                try:
+                    grid = self.driver.find_element(By.ID, "grid_container")
+                    pager_area = grid.find_elements(By.XPATH, ".//*[contains(@class, 'pager')]")
+                    if pager_area:
+                        outer_html = pager_area[0].get_attribute("outerHTML")
+                        self.logger.error(f"Pager container HTML: {outer_html[:200]}")
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            
+            # Save screenshot
+            screenshot_path = Path("outputs") / f"pager_timeout_{int(time.time())}.png"
             screenshot_path.parent.mkdir(exist_ok=True)
             self.driver.save_screenshot(str(screenshot_path))
             self.logger.error(f"Screenshot saved: {screenshot_path}")
@@ -380,7 +405,33 @@ class SeminoleScraper:
             return False
         
         except Exception as e:
-            self.logger.error(f"Error waiting for results: {type(e).__name__}: {e}")
+            self.logger.error(f"Error waiting for igGrid: {type(e).__name__}: {e}")
+            return False
+            
+        except TimeoutException:
+            self.logger.error("Timeout waiting for igGrid results")
+            
+            # Debug info
+            try:
+                record_count = self.driver.find_elements(By.XPATH, 
+                    "//*[contains(text(), 'record') or contains(text(), 'Record')]")
+                record_text = record_count[0].text if record_count else "N/A"
+                self.logger.error(f"Record count text: {record_text}")
+                self.logger.error(f"URL: {self.driver.current_url}")
+                self.logger.error(f"Title: {self.driver.title}")
+            except Exception:
+                pass
+            
+            # Save screenshot
+            screenshot_path = Path("outputs") / f"iggrid_timeout_{int(time.time())}.png"
+            screenshot_path.parent.mkdir(exist_ok=True)
+            self.driver.save_screenshot(str(screenshot_path))
+            self.logger.error(f"Screenshot saved: {screenshot_path}")
+            
+            return False
+        
+        except Exception as e:
+            self.logger.error(f"Error waiting for igGrid: {type(e).__name__}: {e}")
             return False
     
     def _get_pagination_info(self) -> tuple[int, int]:
@@ -414,9 +465,22 @@ class SeminoleScraper:
             self.logger.debug(f"Error parsing pagination: {e}")
             return 1, 1
     
+    def _normalize_header(self, text: str) -> str:
+        """Normalize header text for matching."""
+        if not text:
+            return ""
+        # Replace NBSP with space, lowercase, strip, collapse whitespace
+        return " ".join(text.replace("\u00a0", " ").lower().strip().split())
+    
     def _extract_page_results(self) -> List[Dict[str, Any]]:
         """
-        Extract all rows from the current page's results grid.
+        Extract all rows from igGrid (Infragistics jQuery grid).
+        
+        Strategy:
+        1. Get headers from table.ui-iggrid-headertable
+        2. Get data rows from #grid_scroll table tbody tr
+        3. Map cell values to headers by index
+        4. Fallback: Try reading igGrid dataSource via JavaScript
         
         Returns:
             List of raw row data dictionaries
@@ -424,49 +488,110 @@ class SeminoleScraper:
         rows_data = []
         
         try:
-            # Find all data rows in table
-            rows = self.driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
-            
-            # Get column headers to map indices
+            # A) Get headers from igGrid header table
             headers = []
             try:
-                header_cells = self.driver.find_elements(By.CSS_SELECTOR, "table thead th")
-                headers = [cell.text.strip() for cell in header_cells]
-                self.logger.debug(f"Grid headers: {headers}")
+                header_table = self.driver.find_element(By.CSS_SELECTOR, "table.ui-iggrid-headertable")
+                header_cells = header_table.find_elements(By.CSS_SELECTOR, "th")
+                headers = [cell.text.strip() for cell in header_cells if cell.text.strip()]
+                
+                if headers:
+                    normalized_headers = [self._normalize_header(h) for h in headers]
+                    self.logger.info(f"igGrid headers (original): {headers}")
+                    self.logger.info(f"igGrid headers (normalized): {normalized_headers}")
             except Exception as e:
-                self.logger.warning(f"Could not extract headers: {e}")
+                self.logger.warning(f"Could not extract igGrid headers: {e}")
             
-            for row_idx, row in enumerate(rows):
-                try:
-                    cells = row.find_elements(By.TAG_NAME, "td")
-                    
-                    if len(cells) == 0:
+            # B) Get data rows from #grid_scroll table
+            try:
+                grid_scroll = self.driver.find_element(By.ID, "grid_scroll")
+                data_table = grid_scroll.find_element(By.TAG_NAME, "table")
+                rows = data_table.find_elements(By.CSS_SELECTOR, "tbody tr")
+                
+                self.logger.info(f"Found {len(rows)} rows in #grid_scroll table")
+                
+                for row_idx, row in enumerate(rows):
+                    try:
+                        cells = row.find_elements(By.TAG_NAME, "td")
+                        
+                        if len(cells) == 0:
+                            continue
+                        
+                        # Extract cell values
+                        cell_values = [cell.text.strip() for cell in cells]
+                        
+                        # C) Map to column names by index
+                        row_data = {}
+                        if headers:
+                            for i, header in enumerate(headers):
+                                if i < len(cell_values):
+                                    row_data[header] = cell_values[i] if cell_values[i] else None
+                        else:
+                            # Fallback: use generic column indices
+                            for i, value in enumerate(cell_values):
+                                row_data[f"col_{i}"] = value if value else None
+                        
+                        rows_data.append(row_data)
+                        
+                        # Log first row keys for debugging
+                        if row_idx == 0 and row_data:
+                            self.logger.info(f"First row keys: {list(row_data.keys())}")
+                        
+                    except Exception as e:
+                        self.logger.debug(f"Error extracting row {row_idx}: {e}")
                         continue
-                    
-                    # Extract cell values
-                    cell_values = [cell.text.strip() for cell in cells]
-                    
-                    # Map to column names (if headers available)
-                    row_data = {}
-                    if headers:
-                        for i, header in enumerate(headers):
-                            if i < len(cell_values):
-                                row_data[header] = cell_values[i] if cell_values[i] else None
-                    else:
-                        # Fallback: use generic column indices
-                        for i, value in enumerate(cell_values):
-                            row_data[f"col_{i}"] = value if value else None
-                    
-                    rows_data.append(row_data)
-                    
-                except Exception as e:
-                    self.logger.warning(f"Error extracting row {row_idx}: {e}")
-                    continue
+                
+                self.logger.info(f"Extracted {len(rows_data)} rows from igGrid")
+                
+            except Exception as e:
+                self.logger.warning(f"Could not extract rows from #grid_scroll: {e}")
             
-            self.logger.info(f"Extracted {len(rows_data)} rows from current page")
+            # D) Fallback: Try reading igGrid dataSource via JavaScript
+            if len(rows_data) == 0 and headers:
+                self.logger.info("Attempting JavaScript fallback to read igGrid dataSource...")
+                try:
+                    js_data = self.driver.execute_script("""
+                        try {
+                            const $ = window.jQuery || window.$;
+                            if (!$) return null;
+                            const grid = $("#grid_container").data("igGrid");
+                            if (!grid) return null;
+                            const dataSource = grid.dataSource;
+                            if (!dataSource) return null;
+                            return dataSource.data() || dataSource.dataView() || null;
+                        } catch (e) {
+                            return null;
+                        }
+                    """)
+                    
+                    if js_data and isinstance(js_data, list):
+                        self.logger.info(f"Retrieved {len(js_data)} rows from igGrid dataSource via JS")
+                        rows_data = js_data
+                    else:
+                        self.logger.debug("JavaScript fallback: no data available")
+                        
+                except Exception as e:
+                    self.logger.debug(f"JavaScript fallback failed: {e}")
+            
+            # Final check: if UI shows records but we got 0 rows, debug
+            if len(rows_data) == 0:
+                try:
+                    record_text_elements = self.driver.find_elements(By.XPATH, 
+                        "//*[contains(text(), 'record') or contains(text(), 'Record')]")
+                    if record_text_elements:
+                        record_text = record_text_elements[0].text
+                        if any(char.isdigit() and char != '0' for char in record_text):
+                            # Non-zero record count but no rows extracted
+                            self.logger.warning(f"Record count shows data but extracted 0 rows: '{record_text}'")
+                            screenshot_path = Path("outputs") / f"extraction_mismatch_{int(time.time())}.png"
+                            screenshot_path.parent.mkdir(exist_ok=True)
+                            self.driver.save_screenshot(str(screenshot_path))
+                            self.logger.warning(f"Screenshot saved: {screenshot_path}")
+                except Exception:
+                    pass
             
         except Exception as e:
-            self.logger.error(f"Error extracting page results: {e}")
+            self.logger.error(f"Error in igGrid extraction: {type(e).__name__}: {e}")
         
         return rows_data
     
@@ -646,61 +771,46 @@ class SeminoleScraper:
                 # Extract fields from grid (case-insensitive matching)
                 row_lower = {k.lower(): v for k, v in row.items()}
                 
-                # Helper to get value from row (case-insensitive)
-                def get_field(field_name: str) -> Optional[str]:
+                # Helper to get value from row (flexible matching with synonyms)
+                def get_field(field_candidates: List[str]) -> Optional[str]:
+                    """
+                    Find field value by checking if any candidate appears in any header.
+                    Uses normalized contains matching.
+                    """
                     for key in row.keys():
-                        if key.lower() == field_name.lower():
-                            value = row[key]
-                            return value if value else None
+                        normalized_key = self._normalize_header(key)
+                        for candidate in field_candidates:
+                            candidate_norm = candidate.lower().strip()
+                            if candidate_norm in normalized_key:
+                                value = row[key]
+                                return value if value else None
                     return None
                 
-                # Instrument number (required)
-                instrument_number = (
-                    get_field("Instrument #") or
-                    get_field("Instrument") or
-                    get_field("Instrument Number") or
-                    get_field("Document #") or
-                    get_field("Document Number")
-                )
+                # Instrument number (required) - flexible matching
+                instrument_number = get_field(["instrument", "inst", "doc", "document", "#", "number"])
                 
                 if not instrument_number:
                     self.logger.warning(f"Row {idx}: No instrument number found, skipping")
                     continue
                 
                 # Book and Page
-                book = get_field("Book")
-                page = get_field("Page")
+                book = get_field(["book"])
+                page = get_field(["page"])
                 
                 # Document type
-                doc_type_original = (
-                    get_field("Type") or
-                    get_field("Doc Type") or
-                    get_field("Document Type")
-                )
+                doc_type_original = get_field(["type", "doc type", "document type"])
                 doc_type = doc_type_original.upper().strip() if doc_type_original else None
                 
                 # Parties (deterministic positional mapping)
-                searched_name = (
-                    get_field("Searched Name") or
-                    get_field("Name") or
-                    get_field("Party 1")
-                )
-                cross_party_name = (
-                    get_field("Cross Party Name") or
-                    get_field("Cross Party") or
-                    get_field("Party 2")
-                )
+                searched_name = get_field(["searched name", "name", "party 1"])
+                cross_party_name = get_field(["cross party", "party 2"])
                 
                 # CRITICAL: Use null, not empty list when missing
                 grantors = [searched_name.upper()] if searched_name else None
                 grantees = [cross_party_name.upper()] if cross_party_name else None
                 
                 # Date
-                filed_date = (
-                    get_field("Filed") or
-                    get_field("Date") or
-                    get_field("Record Date")
-                )
+                filed_date = get_field(["filed", "date", "record date"])
                 date_iso = self._parse_date_with_timezone(filed_date)
                 
                 # Build NC schema record
@@ -762,41 +872,57 @@ class SeminoleScraper:
                 lambda d: d.execute_script("return document.readyState") == "complete"
             )
             
-            # Find and fill name input (wait for clickable, not just present)
-            # Use ID selector - more reliable than placeholder
+            # 1) Set criteria direction to BOTH (deterministic search setting)
+            try:
+                direction_both = self.driver.find_element(By.ID, "criteria_direction_both")
+                # Use JavaScript to ensure radio is selected
+                self.driver.execute_script("arguments[0].checked = true; arguments[0].click();", direction_both)
+                
+                # Verify selection
+                is_checked = self.driver.execute_script("return arguments[0].checked;", direction_both)
+                self.logger.info(f"Set criteria direction to BOTH (checked={is_checked})")
+            except Exception as e:
+                self.logger.warning(f"Could not set criteria_direction_both: {e}")
+            
+            # 2) Check and log name criteria checkbox state
+            try:
+                name_direction_cb = self.driver.find_element(By.ID, "criteria_name_direction")
+                is_checked = name_direction_cb.is_selected()
+                self.logger.info(f"Name direction checkbox (#criteria_name_direction): checked={is_checked}")
+            except Exception as e:
+                self.logger.debug(f"Name direction checkbox not found: {e}")
+            
+            # Find and fill name input
             try:
                 name_input = WebDriverWait(self.driver, self.ELEMENT_WAIT_TIMEOUT).until(
                     EC.element_to_be_clickable((By.ID, "criteria_full_name"))
                 )
             except TimeoutException:
-                # Debug: log what inputs ARE present
-                inputs = self.driver.find_elements(By.TAG_NAME, "input")
-                self.logger.error(f"Name input not found. Found {len(inputs)} input elements:")
-                for idx, inp in enumerate(inputs[:10]):  # Log first 10
-                    inp_type = inp.get_attribute("type")
-                    inp_placeholder = inp.get_attribute("placeholder")
-                    inp_name = inp.get_attribute("name")
-                    inp_id = inp.get_attribute("id")
-                    self.logger.error(f"  Input {idx}: type={inp_type}, placeholder={inp_placeholder}, name={inp_name}, id={inp_id}")
-                
-                # Save screenshot for debugging
-                screenshot_path = Path("outputs") / f"error_screenshot_{int(time.time())}.png"
+                # Debug: save screenshot
+                screenshot_path = Path("outputs") / f"name_input_not_found_{int(time.time())}.png"
                 screenshot_path.parent.mkdir(exist_ok=True)
                 self.driver.save_screenshot(str(screenshot_path))
-                self.logger.error(f"Screenshot saved: {screenshot_path}")
-                
-                raise TimeoutException("Could not find name input field. See logs and screenshot for details.")
+                self.logger.error(f"Name input not found. Screenshot: {screenshot_path}")
+                raise TimeoutException("Could not find name input field (id=criteria_full_name)")
             
-            # Scroll into view and ensure interactable
+            # Scroll into view
             self.driver.execute_script(
-                "arguments[0].scrollIntoView({block: 'center', behavior: 'smooth'});",
+                "arguments[0].scrollIntoView({block: 'center'});",
                 name_input
             )
-            time.sleep(0.3)  # Brief pause after scroll
+            time.sleep(0.2)
             
+            # Fill name and trigger JS events for binding
             name_input.clear()
-            name_input.send_keys(name)
-            self.logger.info(f"Entered name: {name}")
+            
+            # Set value and dispatch events to ensure JS model updates
+            self.driver.execute_script("""
+                arguments[0].value = arguments[1];
+                arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
+                arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
+            """, name_input, name)
+            
+            self.logger.info(f"Entered name: '{name}' (with JS events)")
             
             # Find and click SEARCH button (scope to Search Criteria panel, handle <a> elements)
             try:
@@ -846,6 +972,51 @@ class SeminoleScraper:
             
             # Wait for results with strong post-click synchronization
             has_results = self._wait_for_results()
+            
+            # 3) Name format fallback: if 0 results and name has no comma, try with comma
+            if not has_results and "," not in name:
+                # Try converting "LAST FIRST" -> "LAST, FIRST"
+                parts = name.split(maxsplit=1)
+                if len(parts) == 2:
+                    name_with_comma = f"{parts[0]}, {parts[1]}"
+                    self.logger.info(f"0 results with '{name}' - retrying with comma format: '{name_with_comma}'")
+                    
+                    # Clear and re-enter with comma format
+                    name_input = self.driver.find_element(By.ID, "criteria_full_name")
+                    name_input.clear()
+                    self.driver.execute_script("""
+                        arguments[0].value = arguments[1];
+                        arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
+                        arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
+                    """, name_input, name_with_comma)
+                    
+                    self.logger.info(f"Re-entered name: '{name_with_comma}' (with JS events)")
+                    
+                    # Click SEARCH again
+                    try:
+                        search_criteria_panel = self.driver.find_element(
+                            By.XPATH,
+                            "//*[contains(text(), 'Search Criteria') or contains(text(), 'search criteria')]"
+                        )
+                        search_xpath = (
+                            "./ancestor::*[1]/following-sibling::*//*["
+                            "(self::a or self::button or self::input[@type='submit']) "
+                            "and contains(translate(normalize-space(.), "
+                            "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'search')"
+                            "]"
+                        )
+                        search_button = search_criteria_panel.find_element(By.XPATH, search_xpath)
+                        self.driver.execute_script("arguments[0].click();", search_button)
+                        self.logger.info("Re-clicked SEARCH button with comma format")
+                        
+                        # Wait for results again
+                        has_results = self._wait_for_results()
+                        
+                        if has_results:
+                            self.logger.info(f"Comma format '{name_with_comma}' produced results!")
+                    
+                    except Exception as e:
+                        self.logger.warning(f"Comma format retry failed: {e}")
             
             if not has_results:
                 duration = time.time() - start_time
