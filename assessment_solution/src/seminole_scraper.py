@@ -315,19 +315,20 @@ class SeminoleScraper:
     
     def _wait_for_results(self) -> bool:
         """
-        Wait for igGrid results to load (Infragistics jQuery grid).
+        Wait for igGrid to fully render (patient strategy for slow system).
         
         Strategy:
-        1. Wait for #grid_container to exist
-        2. Wait for #grid_pager_label to exist (definitive igGrid pager)
-        3. Parse record count from pager label text
-        4. Return True if total > 0, False if total == 0
+        1. Wait for #grid_container
+        2. Wait for table headers to render (grid structure ready)
+        3. Give additional time for data to populate (slow system)
+        4. Check pager text
+        5. Return True regardless if headers exist (let extraction handle empty data)
         
         Returns:
-            True if results present, False if no results
+            True if grid rendered (even if empty), False only on timeout
         """
         try:
-            # Give the page a moment to start processing
+            # Give the page time to start processing
             time.sleep(1)
             
             # Wait for igGrid container
@@ -336,40 +337,61 @@ class SeminoleScraper:
             )
             self.logger.info("igGrid container loaded")
             
-            # Wait for igGrid pager label (contains "X - Y of Z records")
-            pager_label = WebDriverWait(self.driver, self.ELEMENT_WAIT_TIMEOUT).until(
-                EC.presence_of_element_located((By.ID, "grid_pager_label"))
-            )
+            # CRITICAL: Wait for table HEADERS to render (grid structure is ready)
+            # This is the definitive signal that the grid has initialized
+            self.logger.info("Waiting for igGrid headers to render...")
             
-            # Wait a moment for text to populate
-            time.sleep(1.5)
+            # Try multiple selectors for header table (igGrid can vary)
+            header_cells = None
+            for selector in [
+                "table.ui-iggrid-headertable th",
+                "#grid_container table thead th",
+                "#grid_container th",
+                "table thead th",  # Generic fallback
+            ]:
+                try:
+                    self.logger.debug(f"Trying header selector: {selector}")
+                    header_cells = WebDriverWait(self.driver, 10).until(
+                        lambda d: d.find_elements(By.CSS_SELECTOR, selector) or None
+                    )
+                    if header_cells and len(header_cells) > 0:
+                        self.logger.info(f"Found headers with selector: {selector}")
+                        break
+                except TimeoutException:
+                    continue
             
-            # Read and parse record count
-            pager_text = pager_label.text.strip()
-            self.logger.info(f"igGrid pager text: '{pager_text}'")
-            
-            # Parse "X - Y of Z records" format
-            match = re.search(r'^\s*\d+\s*-\s*\d+\s+of\s+(\d+)\s+records?\s*$', pager_text, re.IGNORECASE)
-            
-            if match:
-                total_records = int(match.group(1))
-                self.logger.info(f"Parsed total records: {total_records}")
-                
-                if total_records == 0:
-                    self.logger.info("No results found (pager shows 0 records)")
-                    return False
-                else:
-                    self.logger.info(f"Results found: {total_records} total records")
-                    return True
+            if not header_cells or len(header_cells) == 0:
+                self.logger.error("Could not find any header cells - grid may not have rendered")
+                # Continue anyway - extraction will handle it
             else:
-                # Couldn't parse - check if pager text indicates no results
-                if "0" in pager_text and "record" in pager_text.lower():
-                    self.logger.info(f"No results (pager text: '{pager_text}')")
-                    return False
+                self.logger.info(f"igGrid headers rendered: {len(header_cells)} columns")
+            
+            # Give the SLOW system additional time to populate data rows
+            # Don't trust early "0 records" - grid might still be loading
+            self.logger.info("Waiting for data to populate (slow system)...")
+            time.sleep(3)  # Patient wait for data loading
+            
+            # Now check pager label (should be updated by now)
+            try:
+                pager_label = self.driver.find_element(By.ID, "grid_pager_label")
+                pager_text = pager_label.text.strip()
+                self.logger.info(f"igGrid pager text (after wait): '{pager_text}'")
+                
+                # Parse total records
+                match = re.search(r'^\s*\d+\s*-\s*\d+\s+of\s+(\d+)\s+records?\s*$', pager_text, re.IGNORECASE)
+                if match:
+                    total_records = int(match.group(1))
+                    self.logger.info(f"Parsed total records: {total_records}")
                 else:
-                    # Assume has results if pager exists with non-zero text
-                    self.logger.warning(f"Could not parse pager text: '{pager_text}' - assuming results exist")
-                    return True
+                    self.logger.debug(f"Could not parse pager text: '{pager_text}'")
+                    
+            except Exception as e:
+                self.logger.debug(f"Could not read pager label: {e}")
+            
+            # ALWAYS return True if headers rendered - let extraction handle empty data
+            # This prevents exiting before the grid finishes loading
+            self.logger.info("igGrid structure ready - proceeding to extraction")
+            return True
             
         except TimeoutException:
             self.logger.error("Timeout waiting for igGrid pager label")
@@ -488,19 +510,30 @@ class SeminoleScraper:
         rows_data = []
         
         try:
-            # A) Get headers from igGrid header table
+            # A) Get headers from igGrid - try multiple selectors (same as wait_for_results)
             headers = []
-            try:
-                header_table = self.driver.find_element(By.CSS_SELECTOR, "table.ui-iggrid-headertable")
-                header_cells = header_table.find_elements(By.CSS_SELECTOR, "th")
-                headers = [cell.text.strip() for cell in header_cells if cell.text.strip()]
-                
-                if headers:
-                    normalized_headers = [self._normalize_header(h) for h in headers]
-                    self.logger.info(f"igGrid headers (original): {headers}")
-                    self.logger.info(f"igGrid headers (normalized): {normalized_headers}")
-            except Exception as e:
-                self.logger.warning(f"Could not extract igGrid headers: {e}")
+            for selector in [
+                "#grid_container table thead th",
+                "table.ui-iggrid-headertable th",
+                "#grid_container th",
+            ]:
+                try:
+                    header_cells = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if header_cells and len(header_cells) > 0:
+                        headers = [cell.text.strip() for cell in header_cells if cell.text.strip()]
+                        if headers:
+                            self.logger.info(f"Extracted headers using selector: {selector}")
+                            break
+                except Exception as e:
+                    self.logger.debug(f"Selector {selector} failed: {e}")
+                    continue
+            
+            if headers:
+                normalized_headers = [self._normalize_header(h) for h in headers]
+                self.logger.info(f"igGrid headers (original): {headers}")
+                self.logger.info(f"igGrid headers (normalized): {normalized_headers}")
+            else:
+                self.logger.error("Could not extract igGrid headers with any selector!")
             
             # B) Get data rows from #grid_scroll table
             try:
@@ -872,11 +905,16 @@ class SeminoleScraper:
                 lambda d: d.execute_script("return document.readyState") == "complete"
             )
             
-            # 1) Set criteria direction to BOTH (deterministic search setting)
+            # 1) Set criteria direction to BOTH (use native click, not just JS property)
             try:
                 direction_both = self.driver.find_element(By.ID, "criteria_direction_both")
-                # Use JavaScript to ensure radio is selected
-                self.driver.execute_script("arguments[0].checked = true; arguments[0].click();", direction_both)
+                
+                # Check if already selected
+                is_checked = self.driver.execute_script("return arguments[0].checked;", direction_both)
+                if not is_checked:
+                    # Use native click to trigger proper event handlers
+                    direction_both.click()
+                    time.sleep(0.2)  # Let event handlers complete
                 
                 # Verify selection
                 is_checked = self.driver.execute_script("return arguments[0].checked;", direction_both)
@@ -884,13 +922,21 @@ class SeminoleScraper:
             except Exception as e:
                 self.logger.warning(f"Could not set criteria_direction_both: {e}")
             
-            # 2) Check and log name criteria checkbox state
+            # 2) ENSURE name criteria checkbox is CHECKED (use native click)
+            # This checkbox controls showing the searched name in results column
             try:
                 name_direction_cb = self.driver.find_element(By.ID, "criteria_name_direction")
-                is_checked = name_direction_cb.is_selected()
-                self.logger.info(f"Name direction checkbox (#criteria_name_direction): checked={is_checked}")
+                initial_state = self.driver.execute_script("return arguments[0].checked;", name_direction_cb)
+                
+                # Ensure it's checked using native click (triggers proper handlers)
+                if not initial_state:
+                    name_direction_cb.click()
+                    time.sleep(0.2)  # Let event handlers complete
+                
+                final_state = self.driver.execute_script("return arguments[0].checked;", name_direction_cb)
+                self.logger.info(f"Name direction checkbox (#criteria_name_direction): checked={final_state}")
             except Exception as e:
-                self.logger.debug(f"Name direction checkbox not found: {e}")
+                self.logger.warning(f"Could not set name direction checkbox: {e}")
             
             # Find and fill name input
             try:
@@ -912,17 +958,23 @@ class SeminoleScraper:
             )
             time.sleep(0.2)
             
-            # Fill name and trigger JS events for binding
+            # Fill name using native send_keys (triggers natural events)
             name_input.clear()
+            time.sleep(0.2)  # Brief pause after clear
             
-            # Set value and dispatch events to ensure JS model updates
-            self.driver.execute_script("""
-                arguments[0].value = arguments[1];
-                arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
-                arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
-            """, name_input, name)
+            name_input.send_keys(name)
             
-            self.logger.info(f"Entered name: '{name}' (with JS events)")
+            # Verify value was set
+            entered_value = name_input.get_attribute("value")
+            self.logger.info(f"Entered name: '{entered_value}'")
+            
+            # Trigger blur to ensure onChange handlers fire
+            name_input.send_keys("\t")  # Tab away from field
+            
+            # CRITICAL: Wait for form to be fully ready before clicking SEARCH
+            # The form needs time to process bindings/validation after input
+            self.logger.info("Waiting for form to be ready...")
+            time.sleep(2)  # Give form time to process input and update state
             
             # Find and click SEARCH button (scope to Search Criteria panel, handle <a> elements)
             try:
@@ -981,42 +1033,52 @@ class SeminoleScraper:
                     name_with_comma = f"{parts[0]}, {parts[1]}"
                     self.logger.info(f"0 results with '{name}' - retrying with comma format: '{name_with_comma}'")
                     
-                    # Clear and re-enter with comma format
-                    name_input = self.driver.find_element(By.ID, "criteria_full_name")
-                    name_input.clear()
-                    self.driver.execute_script("""
-                        arguments[0].value = arguments[1];
-                        arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
-                        arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
-                    """, name_input, name_with_comma)
-                    
-                    self.logger.info(f"Re-entered name: '{name_with_comma}' (with JS events)")
-                    
-                    # Click SEARCH again
                     try:
-                        search_criteria_panel = self.driver.find_element(
-                            By.XPATH,
-                            "//*[contains(text(), 'Search Criteria') or contains(text(), 'search criteria')]"
+                        # Ensure in default content
+                        self.driver.switch_to.default_content()
+                        
+                        # Re-locate and clear name input
+                        name_input = WebDriverWait(self.driver, 10).until(
+                            EC.presence_of_element_located((By.ID, "criteria_full_name"))
                         )
-                        search_xpath = (
-                            "./ancestor::*[1]/following-sibling::*//*["
-                            "(self::a or self::button or self::input[@type='submit']) "
-                            "and contains(translate(normalize-space(.), "
-                            "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'search')"
-                            "]"
+                        
+                        # Clear and enter with native send_keys
+                        name_input.clear()
+                        time.sleep(0.2)
+                        name_input.send_keys(name_with_comma)
+                        time.sleep(0.3)
+                        name_input.send_keys("\t")  # Tab to trigger blur/change
+                        
+                        entered_value = name_input.get_attribute("value")
+                        self.logger.info(f"Re-entered name: '{entered_value}'")
+                        
+                        # Re-locate SEARCH control with simpler, more reliable XPath
+                        search_control = WebDriverWait(self.driver, 10).until(
+                            EC.presence_of_element_located((
+                                By.XPATH,
+                                "//*[(self::a or self::button) and contains(translate(normalize-space(.), "
+                                "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'search')]"
+                            ))
                         )
-                        search_button = search_criteria_panel.find_element(By.XPATH, search_xpath)
-                        self.driver.execute_script("arguments[0].click();", search_button)
-                        self.logger.info("Re-clicked SEARCH button with comma format")
+                        
+                        # Scroll and click with JavaScript
+                        self.driver.execute_script(
+                            "arguments[0].scrollIntoView({block: 'center'}); arguments[0].click();",
+                            search_control
+                        )
+                        self.logger.info("Re-clicked SEARCH control with comma format")
                         
                         # Wait for results again
                         has_results = self._wait_for_results()
                         
                         if has_results:
-                            self.logger.info(f"Comma format '{name_with_comma}' produced results!")
+                            self.logger.info(f"✓ Comma format '{name_with_comma}' produced results!")
+                        else:
+                            self.logger.info(f"Comma format also returned 0 results")
                     
                     except Exception as e:
-                        self.logger.warning(f"Comma format retry failed: {e}")
+                        self.logger.warning(f"Comma format retry failed: {type(e).__name__}: {e}")
+                        # Continue with no results (don't crash)
             
             if not has_results:
                 duration = time.time() - start_time

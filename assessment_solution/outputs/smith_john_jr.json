@@ -1,1 +1,322 @@
-[]
+[
+  {
+    "instrument_number": "1971-028705",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "00891",
+    "page": "0033",
+    "doc_type": "PARTIAL RELEASE",
+    "doc_category": null,
+    "original_doc_type": "PARTIAL RELEASE",
+    "book_type": null,
+    "grantors": [
+      "SMITH JOHN JR"
+    ],
+    "grantees": [
+      "SIMONS JEROME A"
+    ],
+    "date": "1971-11-10T00:00:00-05:00",
+    "consideration": null
+  },
+  {
+    "instrument_number": "1971-027586",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "00888",
+    "page": "0185",
+    "doc_type": "PARTIAL RELEASE",
+    "doc_category": null,
+    "original_doc_type": "PARTIAL RELEASE",
+    "book_type": null,
+    "grantors": [
+      "SMITH JOHN JR"
+    ],
+    "grantees": [
+      "SIMONS JEROME A"
+    ],
+    "date": "1971-11-01T00:00:00-05:00",
+    "consideration": null
+  },
+  {
+    "instrument_number": "1964-072166",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "00503",
+    "page": "0264",
+    "doc_type": "CTF DISBURSED",
+    "doc_category": null,
+    "original_doc_type": "CTF DISBURSED",
+    "book_type": null,
+    "grantors": [
+      "SMITH JOHN JR"
+    ],
+    "grantees": [
+      "FEDERAL NATIONAL MORTGAGE ASSN"
+    ],
+    "date": "1964-08-25T00:00:00-04:00",
+    "consideration": null
+  },
+  {
+    "instrument_number": "1964-072167",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "00503",
+    "page": "0265",
+    "doc_type": "CTF TITLE",
+    "doc_category": null,
+    "original_doc_type": "CTF TITLE",
+    "book_type": null,
+    "grantors": [
+      "SMITH JOHN JR"
+    ],
+    "grantees": [
+      "FEDERAL NATIONAL MORTGAGE ASSN"
+    ],
+    "date": "1964-08-25T00:00:00-04:00",
+    "consideration": null
+  },
+  {
+    "instrument_number": "1964-071672",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "00502",
+    "page": "0107",
+    "doc_type": "CERTIFICATE",
+    "doc_category": null,
+    "original_doc_type": "CERTIFICATE",
+    "book_type": null,
+    "grantors": [
+      "SMITH JOHN JR"
+    ],
+    "grantees": [
+      "FEDERAL NATIONAL MORTGAGE ASSN"
+    ],
+    "date": "1964-08-14T00:00:00-04:00",
+    "consideration": null
+  },
+  {
+    "instrument_number": "1964-070950",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "00500",
+    "page": "0316",
+    "doc_type": "JUDGMENT",
+    "doc_category": null,
+    "original_doc_type": "JUDGMENT",
+    "book_type": null,
+    "grantors": [
+      "SMITH JOHN JR"
+    ],
+    "grantees": [
+      "FEDERAL NATIONAL MORTGAGE ASSN"
+    ],
+    "date": "1964-07-31T00:00:00-04:00",
+    "consideration": null
+  },
+  {
+    "instrument_number": "1964-069792",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "00497",
+    "page": "0379",
+    "doc_type": "NOTICE",
+    "doc_category": null,
+    "original_doc_type": "NOTICE",
+    "book_type": null,
+    "grantors": [
+      "SMITH JOHN JR"
+    ],
+    "grantees": [
+      "FEDERAL NATIONAL MORTGAGE ASSN"
+    ],
+    "date": "1964-07-07T00:00:00-04:00",
+    "consideration": null
+  },
+  {
+    "instrument_number": "1964-067898",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "00492",
+    "page": "0551",
+    "doc_type": "LIS PENDENS",
+    "doc_category": null,
+    "original_doc_type": "LIS PENDENS",
+    "book_type": null,
+    "grantors": [
+      "SMITH JOHN JR"
+    ],
+    "grantees": [
+      "FEDERAL NATIONAL MORTGAGE ASSN"
+    ],
+    "date": "1964-05-27T00:00:00-04:00",
+    "consideration": null
+  },
+  {
+    "instrument_number": "1964-065899",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "00487",
+    "page": "0593",
+    "doc_type": "DEED",
+    "doc_category": null,
+    "original_doc_type": "DEED",
+    "book_type": null,
+    "grantors": [
+      "SMITH JOHN JR"
+    ],
+    "grantees": [
+      "HURST JACK V"
+    ],
+    "date": "1964-04-14T00:00:00-05:00",
+    "consideration": null
+  },
+  {
+    "instrument_number": "1964-065900",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "00487",
+    "page": "0593.1",
+    "doc_type": "MORTGAGE",
+    "doc_category": null,
+    "original_doc_type": "MORTGAGE",
+    "book_type": null,
+    "grantors": [
+      "SMITH JOHN JR"
+    ],
+    "grantees": [
+      "HURST JACK V"
+    ],
+    "date": "1964-04-14T00:00:00-05:00",
+    "consideration": null
+  },
+  {
+    "instrument_number": "1963-055619",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "00462",
+    "page": "0269",
+    "doc_type": "DEED",
+    "doc_category": null,
+    "original_doc_type": "DEED",
+    "book_type": null,
+    "grantors": [
+      "SMITH JOHN JR"
+    ],
+    "grantees": [
+      "ROWSEY ROY V"
+    ],
+    "date": "1963-09-17T00:00:00-04:00",
+    "consideration": null
+  },
+  {
+    "instrument_number": "1960-074698",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "00294",
+    "page": "0288",
+    "doc_type": "JUDGMENT",
+    "doc_category": null,
+    "original_doc_type": "JUDGMENT",
+    "book_type": null,
+    "grantors": [
+      "SMITH JOHN JR"
+    ],
+    "grantees": [
+      "SMITH JANIE LEE"
+    ],
+    "date": "1960-04-15T00:00:00-05:00",
+    "consideration": null
+  },
+  {
+    "instrument_number": "1960-075684",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "00298",
+    "page": "0175",
+    "doc_type": "JUDGMENT",
+    "doc_category": null,
+    "original_doc_type": "JUDGMENT",
+    "book_type": null,
+    "grantors": [
+      "SMITH JOHN JR"
+    ],
+    "grantees": [
+      "SMITH JANIE LEE"
+    ],
+    "date": "1960-05-10T00:00:00-04:00",
+    "consideration": null
+  },
+  {
+    "instrument_number": "1989-605350",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "02062",
+    "page": "1857",
+    "doc_type": "SATISFACTION",
+    "doc_category": null,
+    "original_doc_type": "SATISFACTION",
+    "book_type": null,
+    "grantors": [
+      "SMITH,JOHN JR"
+    ],
+    "grantees": [
+      "ELLIS,GAIL S"
+    ],
+    "date": "1989-04-25T14:58:08-04:00",
+    "consideration": null
+  },
+  {
+    "instrument_number": "1995-700805",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "02912",
+    "page": "0802",
+    "doc_type": "DEATH CERTIFICATE",
+    "doc_category": null,
+    "original_doc_type": "DEATH CERTIFICATE",
+    "book_type": null,
+    "grantors": [
+      "SMITH,JOHN JR"
+    ],
+    "grantees": [
+      "RE DEATH CERTIFICATE"
+    ],
+    "date": "1995-05-05T14:58:08-04:00",
+    "consideration": null
+  },
+  {
+    "instrument_number": "2007104443",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "06761",
+    "page": "1636",
+    "doc_type": "AFFIDAVIT",
+    "doc_category": null,
+    "original_doc_type": "AFFIDAVIT",
+    "book_type": null,
+    "grantors": [
+      "SMITH,JOHN JR"
+    ],
+    "grantees": [
+      "RE AFFIDAVIT"
+    ],
+    "date": "2007-07-17T14:58:08-04:00",
+    "consideration": null
+  }
+]
