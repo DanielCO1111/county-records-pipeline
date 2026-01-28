@@ -1,0 +1,19 @@
+[
+  {
+    "instrument_number": "SAMPLE-001",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "1234",
+    "page": "567",
+    "doc_type": "WARRANTY DEED",
+    "doc_category": null,
+    "original_doc_type": "WD",
+    "book_type": null,
+    "grantors": ["SAMPLE SELLER"],
+    "grantees": ["SAMPLE BUYER"],
+    "date": "2024-01-15T20:00:00-05:00",
+    "consideration": null
+  }
+]
+

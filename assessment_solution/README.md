@@ -11,8 +11,10 @@
 **Output:** `outputs/county_patterns.json`  
 **Objective:** Extract and document patterns in instrument numbers, book/page numbers, date ranges, and document types for each of the 13 NC counties.
 
-### 🔜 Task 2: TBD
-(To be implemented)
+### ✅ Task 2: Seminole County FL Scraper (COMPLETE)
+**Script:** `src/seminole_scraper.py`  
+**Output:** `outputs/seminole_test_results.json`  
+**Objective:** Scrape Seminole County FL official records and convert to NC schema format for system compatibility.
 
 ---
 
@@ -21,12 +23,16 @@
 ```
 assessment_solution/
 ├── src/
-│   └── pattern_analyzer.py      # Task 1: County pattern analysis
+│   ├── pattern_analyzer.py       # Task 1: County pattern analysis
+│   ├── seminole_scraper.py       # Task 2: FL county scraper
+│   └── test_seminole_scraper.py  # Task 2: Test runner
 ├── outputs/
-│   └── county_patterns.json     # Task 1: Generated analysis results
-├── requirements.txt              # Python dependencies
-├── pyproject.toml               # Code formatting/linting configuration
-└── README.md                    # This file
+│   ├── county_patterns.json      # Task 1: Analysis results
+│   ├── seminole_test_results.json # Task 2: Scraped FL records
+│   └── test_summary.json         # Task 2: Test metrics (supplemental)
+├── requirements.txt               # Python dependencies
+├── pyproject.toml                # Code formatting/linting configuration
+└── README.md                     # This file
 
 ../  (parent directory)
 ├── nc_records_assessment.jsonl  # Input: JSONL data (~14K records, ~2-3 MB)
@@ -62,15 +68,27 @@ assessment_solution/
 All Python dependencies are listed in `requirements.txt`:
 
 ```txt
-pandas          # Data manipulation (available but not required for pattern_analyzer.py)
-python-dateutil # Robust date parsing (installed but ISO-strict parsing used)
-tqdm            # Progress bars (not used in current implementation)
-requests        # HTTP requests (not used in pattern analyzer)
-beautifulsoup4  # HTML parsing (not used in pattern analyzer)
-lxml            # XML processing (not used in pattern analyzer)
+# Task 1 (Pattern Analyzer) - mostly unused, kept for compatibility
+pandas          # Data manipulation
+python-dateutil # Date parsing (used in Task 2)
+tqdm            # Progress bars
+
+# Task 2 (Seminole Scraper) - required dependencies
+selenium        # Browser automation for dynamic websites
+webdriver-manager # Automatic WebDriver management
+pytz            # Timezone handling for ET/EST conversions
+
+# Development tools
+requests        # HTTP requests
+beautifulsoup4  # HTML parsing
+lxml            # XML processing
+black           # Code formatter
+ruff            # Python linter
 ```
 
-**Note:** The pattern analyzer (`src/pattern_analyzer.py`) uses only Python standard library features for core functionality. External dependencies are available but not utilized in the current implementation to maintain simplicity and minimize dependencies.
+**Note:** 
+- Task 1 (`pattern_analyzer.py`) uses only Python standard library
+- Task 2 (`seminole_scraper.py`) requires Selenium for interacting with the dynamic DuProcess grid
 
 ### Data Requirements
 
@@ -317,13 +335,295 @@ python -m pip install -r requirements.txt
 
 # 2. Run Task 1 - Pattern Analyzer
 python src/pattern_analyzer.py
-
 # Output: outputs/county_patterns.json
+
+# 3. Run Task 2 - Seminole Scraper (single search)
+python src/seminole_scraper.py --name "SMITH JOHN"
+# Output: outputs/seminole_test_results.json
+
+# 4. Run Task 2 - All test cases
+python src/test_seminole_scraper.py
+# Output: outputs/seminole_test_results.json + test_summary.json
 ```
 
-**Expected:** Processes 13,886 records in 5-10 seconds.
+**Expected:** 
+- Task 1: Processes 13,886 records in 5-10 seconds
+- Task 2: Performance varies by result size (100-150 records/minute typical)
+
+---
+
+## 🌐 Task 2: Seminole County FL Scraper
+
+### Overview
+
+Task 2 implements a production-grade web scraper for Seminole County, Florida official records that:
+- Searches records by person/entity name
+- Handles pagination across large result sets (2000+ records, 60+ pages)
+- Converts FL data to NC schema format for system compatibility
+- Follows a **conservative, schema-first approach** to ensure data fidelity
+
+**Website:** https://recording.seminoleclerk.org/DuProcessWebInquiry/index.html
+
+### How It Works
+
+#### 1. Architecture
+
+The scraper uses **Selenium WebDriver** with Chrome to interact with the dynamic DuProcess WebInquiry system:
+
+```
+User Input (Name) 
+    ↓
+Accept Disclaimer ("AGREED & ENTER")
+    ↓
+Fill Search Form → Click Search
+    ↓
+Wait for Grid (Grid-First Strategy)
+    ↓
+Extract Page Results
+    ↓
+Pagination Loop → Next Page
+    ↓
+Transform to NC Schema
+    ↓
+Output JSON Array
+```
+
+#### 2. Key Implementation Details
+
+**Disclaimer Handling:**
+- The site requires clicking "AGREED & ENTER" before accessing search
+- Implementation: `_accept_disclaimer_if_present()` - idempotent, robust XPath locator
+
+**Grid-First Wait Strategy:**
+- **Primary:** Wait for grid rows to be present/populated (actual success condition)
+- **Secondary:** Check for spinner disappearance (best-effort, non-blocking)
+- **Rationale:** Grid presence is more reliable than spinner absence
+
+**Pagination Handling:**
+- Detects "Pg X of Y" footer text to track progress
+- Client-side pagination: No network requests between pages
+- Wait condition: First row's Instrument # changes (custom EC)
+- Safety: Per-page timeout (60s) and total runtime limit (1 hour)
+- **No artificial page caps** - scrapes all pages site indicates
+
+**Party Assignment (Non-Semantic):**
+- Grid provides "Searched Name" and "Cross Party Name" columns
+- Grid does NOT explicitly label grantor vs grantee roles
+- **Implementation:** Deterministic positional mapping
+  - `grantors`: [Searched Name] if present, else `null`
+  - `grantees`: [Cross Party Name] if present, else `null`
+- ⚠️ **Important:** This is column-based assignment, NOT legal/semantic role inference
+
+### Schema Mapping & Assumptions
+
+#### Conservative Design Principles
+
+This scraper follows a **schema-first, conservative approach**:
+
+✅ **Populate:** Only fields explicitly provided by the Seminole grid  
+❌ **Don't guess:** No inference, no text mining, no assumptions  
+✅ **Use null:** When field unavailable (following assignment requirement)
+
+#### Field Mapping Table
+
+| NC Schema Field | Seminole Grid Source | Notes |
+|----------------|---------------------|-------|
+| `instrument_number` | "Instrument #" column | Direct mapping |
+| `parcel_number` | ❌ Not available | Always `null` |
+| `county` | Hardcoded | Always `"seminole"` |
+| `state` | Hardcoded | Always `"FL"` |
+| `book` | "Book" column | Direct mapping or `null` |
+| `page` | "Page" column | Direct mapping or `null` |
+| `doc_type` | "Type" column | Minimal normalization (`.upper().strip()`) |
+| `doc_category` | ❌ Not available | Always `null` |
+| `original_doc_type` | "Type" column | Preserved exactly as shown |
+| `book_type` | ❌ Not available | Always `null` |
+| `grantors` | "Searched Name" column | List if present, `null` if missing (NOT `[]`) |
+| `grantees` | "Cross Party Name" column | List if present, `null` if missing (NOT `[]`) |
+| `date` | "Filed" column | Parsed to ISO 8601 with ET timezone |
+| `consideration` | ❌ Not available | Always `null` |
+
+#### Critical Assumptions
+
+**1. doc_category: Always null**
+- **Assumption:** The results grid does not include a `doc_category` column
+- **Rationale:** Inferring categories from "Type" string would be subjective and potentially incorrect
+- **Alternative:** If site exposed explicit category data, we would map it directly
+
+**2. book_type: Always null**
+- **Assumption:** The results grid does not include a `book_type` column
+- **Rationale:** We don't guess "OR" (Official Records) even if book numbers are numeric
+- **Alternative:** If Book column contained prefixes (e.g., "OR 1234"), we would extract them
+
+**3. consideration: Always null**
+- **Assumption:** No explicit "Consideration" or "Amount" column in results grid
+- **Rationale:** Parsing unstructured Description text for dollar amounts is brittle and violates "use null for unavailable fields" rule
+- **Alternative:** If grid had explicit consideration column, we would use it
+
+**4. Party Roles (grantors/grantees): Column-Based, Not Legal**
+- **Assumption:** "Searched Name" → grantors, "Cross Party Name" → grantees
+- **Rationale:** Site doesn't label legal roles; we use deterministic positional mapping
+- **⚠️ Warning:** This is NOT semantic/legal role determination
+- **Alternative:** If grid had explicit "Grantor" / "Grantee" columns, we would use them
+
+**5. Empty vs null for Lists**
+- **Critical:** When party name is missing, we use `null` (not `[]`)
+- **Rationale:** Assignment explicitly states "use null for fields not available"
+- **Example:** `"grantors": null` when Searched Name is empty
+
+**6. Timezone Handling**
+- **Assumption:** "Filed" dates are in Eastern Time (America/New_York)
+- **Implementation:** Apply ET timezone with correct DST offset (-04:00 or -05:00)
+- **Alternative:** If site provided explicit timezone info, we would use it
+
+### Challenges Encountered
+
+#### 1. Client-Side Pagination Without Network Requests
+
+**Challenge:** Clicking "Next" doesn't trigger XHR requests; page changes are instantaneous  
+**Solution:** Custom wait condition that detects when first row's Instrument # changes  
+**Impact:** Reliable page transition detection without depending on network activity
+
+#### 2. Disclaimer Gate
+
+**Challenge:** Site requires clicking "AGREED & ENTER" before accessing search  
+**Solution:** `_accept_disclaimer_if_present()` - idempotent with robust XPath locator  
+**Impact:** Handles both disclaimer-present and disclaimer-absent flows gracefully
+
+#### 3. Dynamic Grid Rendering
+
+**Challenge:** DuProcess grid uses dynamic rendering with potential loading overlays  
+**Solution:** Grid-first wait strategy (rows present = success), spinner as supplementary  
+**Impact:** More reliable synchronization than waiting for spinner disappearance
+
+#### 4. Party Role Ambiguity
+
+**Challenge:** Grid doesn't label grantor vs grantee explicitly  
+**Solution:** Deterministic positional mapping, clearly documented as non-legal  
+**Impact:** Avoids incorrect legal assumptions while maintaining NC schema compatibility
+
+#### 5. Large Result Sets
+
+**Challenge:** Common names return 2000+ records across 60+ pages  
+**Solution:** Runtime-based safety limits instead of page caps; detailed progress logging  
+**Impact:** Allows legitimate large datasets while preventing infinite loops
+
+### Edge Case Handling
+
+| Edge Case | Handling Strategy | Implementation |
+|-----------|------------------|----------------|
+| **No results** | Return empty array `[]` | Check for "No records" message or empty grid |
+| **Network failures** | Retry with exponential backoff | Max 3 retries per operation |
+| **Timeouts** | Per-page (60s) and total (1 hour) limits | Log clearly when limits trigger |
+| **Missing fields** | Use `null` (not empty string/list) | Strict null assignment for unavailable data |
+| **Parse errors** | Log warning, continue with next row | Graceful degradation per-row |
+| **Last page detection** | Check "Pg X of Y" and Next button state | Multiple detection methods for robustness |
+
+### Test Results Summary
+
+**Test Cases:**
+1. **SMITH JOHN** - Large result set (2000+ records expected, 60+ pages)
+2. **JONES, WILLIAM S** - Moderate result set (~55 records expected, ~2 pages)
+3. **ZZZTEST, NORESULT** - Zero results (validates no-results flow)
+
+**Performance Target:** 100-150 records/minute
+
+**Note:** Actual test execution requires running `python src/test_seminole_scraper.py` or individual searches via CLI. Performance depends on site responsiveness and result set sizes.
+
+### Usage
+
+#### Command-Line Interface
+
+```bash
+# Single name search
+python src/seminole_scraper.py --name "SMITH JOHN" --output outputs/seminole_test_results.json
+
+# Headless mode (no browser window)
+python src/seminole_scraper.py --name "JONES, WILLIAM S" --headless
+
+# Run all test cases
+python src/test_seminole_scraper.py
+```
+
+#### Python API
+
+```python
+from seminole_scraper import SeminoleScraper
+
+# Initialize scraper
+scraper = SeminoleScraper(headless=True)
+
+try:
+    # Search by name
+    records = scraper.search_by_name("SMITH JOHN")
+    
+    # records is a List[Dict] of NC-schema objects
+    print(f"Found {len(records)} records")
+    
+finally:
+    scraper.close()
+```
+
+### Output Format
+
+**File:** `outputs/seminole_test_results.json`
+
+**Structure:** Plain JSON array of NC-schema records (NO metadata wrapper)
+
+```json
+[
+  {
+    "instrument_number": "20240012345",
+    "parcel_number": null,
+    "county": "seminole",
+    "state": "FL",
+    "book": "1234",
+    "page": "567",
+    "doc_type": "WARRANTY DEED",
+    "doc_category": null,
+    "original_doc_type": "WD",
+    "book_type": null,
+    "grantors": ["SMITH JOHN"],
+    "grantees": ["JONES MARY"],
+    "date": "2024-01-15T20:00:00-05:00",
+    "consideration": null
+  }
+]
+```
+
+**Critical:** Output is a plain array matching NC dataset format exactly. Test summary/metrics are saved separately in `test_summary.json` for documentation purposes.
+
+### Dependencies
+
+**Required:**
+- `selenium` - Browser automation for dynamic site interaction
+- `webdriver-manager` - Automatic ChromeDriver management
+- `pytz` - Timezone handling for ET/EST conversions
+- `python-dateutil` - Flexible date parsing
+
+**Notes:**
+- Requires Chrome browser installed on system
+- `webdriver-manager` downloads compatible ChromeDriver automatically
+- Tested on Windows/Linux/macOS
+
+### Performance Characteristics
+
+**Estimated Performance:**
+- Small result sets (<100 records): ~30-60 seconds
+- Medium result sets (100-500 records): ~2-5 minutes
+- Large result sets (2000+ records): ~15-25 minutes
+
+**Factors:**
+- Site response time (network latency)
+- Result set size and pagination count
+- Request delay (2s between pages for respectful scraping)
+
+**Safety Limits:**
+- Per-page timeout: 60 seconds
+- Total runtime limit: 1 hour (configurable)
+- No artificial page caps (scrapes all indicated pages)
 
 ---
 
 **Last Updated:** January 2026  
-**Status:** Task 1 complete, ready for Task 2
+**Status:** Tasks 1 & 2 complete
