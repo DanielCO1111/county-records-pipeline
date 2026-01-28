@@ -22,6 +22,7 @@ from dateutil import parser as date_parser
 from selenium import webdriver
 from selenium.common.exceptions import (
     NoSuchElementException,
+    StaleElementReferenceException,
     TimeoutException,
     WebDriverException,
 )
@@ -458,27 +459,36 @@ class SeminoleScraper:
     
     def _get_pagination_info(self) -> tuple[int, int]:
         """
-        Extract current page and total pages from pagination footer.
+        Extract current page and total pages from igGrid pager.
+        
+        Uses the pager label text "X - Y of Z records" to calculate pages.
         
         Returns:
             (current_page, total_pages) tuple
         """
         try:
-            # Look for "Pg X of Y" or similar text
-            footer_elements = self.driver.find_elements(
-                By.XPATH,
-                "//*[contains(text(), 'Pg') or contains(text(), 'Page')]"
-            )
+            # Read igGrid pager label
+            pager_label = self.driver.find_element(By.ID, "grid_pager_label")
+            pager_text = pager_label.text.strip()
             
-            for elem in footer_elements:
-                text = elem.text
-                # Parse "Pg 1 of 10" or "Page 1 of 10"
-                if " of " in text:
-                    parts = text.split(" of ")
-                    if len(parts) == 2:
-                        current_str = parts[0].split()[-1]  # Get last word (the number)
-                        total_str = parts[1].split()[0]  # Get first word (the number)
-                        return int(current_str), int(total_str)
+            # Parse "1 - 30 of 81 records" format
+            match = re.search(r'^\s*(\d+)\s*-\s*(\d+)\s+of\s+(\d+)\s+records?\s*$', pager_text, re.IGNORECASE)
+            
+            if match:
+                start = int(match.group(1))
+                end = int(match.group(2))
+                total = int(match.group(3))
+                
+                # Calculate current page and total pages
+                # Assuming 30 records per page (default igGrid page size)
+                records_per_page = end - start + 1  # Actual records on this page
+                if records_per_page == 0:
+                    records_per_page = 30  # Default
+                
+                current_page = (start - 1) // records_per_page + 1 if start > 0 else 1
+                total_pages = (total + records_per_page - 1) // records_per_page
+                
+                return current_page, total_pages
             
             # Fallback: assume single page
             return 1, 1
@@ -628,78 +638,382 @@ class SeminoleScraper:
         
         return rows_data
     
-    def _click_next_page(self) -> bool:
+    def _get_first_row_instrument(self) -> Optional[str]:
+        """Get the instrument number from the first data row for change detection."""
+        try:
+            first_cell = self.driver.find_element(
+                By.CSS_SELECTOR, "#grid_scroll table tbody tr:first-child td:first-child"
+            )
+            return first_cell.text.strip()
+        except Exception:
+            return None
+    
+    def _wait_for_loading_complete(self):
+        """Wait for igGrid loading indicator to appear then disappear."""
+        try:
+            # igGrid shows #grid_container_loading during page transitions
+            loading_selector = "#grid_container_loading"
+            
+            # Brief wait for loading to appear (may not always show)
+            try:
+                WebDriverWait(self.driver, 1).until(
+                    EC.visibility_of_element_located((By.CSS_SELECTOR, loading_selector))
+                )
+                self.logger.debug("Loading indicator appeared")
+            except TimeoutException:
+                pass  # Loading may be too fast to catch
+            
+            # Wait for loading to disappear
+            WebDriverWait(self.driver, self.PAGE_TIMEOUT).until(
+                EC.invisibility_of_element_located((By.CSS_SELECTOR, loading_selector))
+            )
+            self.logger.debug("Loading indicator hidden")
+            
+        except Exception as e:
+            self.logger.debug(f"Loading wait skipped: {e}")
+    
+    def _find_visible_next_button(self) -> Optional[Any]:
         """
-        Click the 'Next' button to navigate to next page.
+        Find the REAL visible and enabled Next button.
+        
+        igGrid's Next control is a DIV element (not an <a> inside it):
+          <div class="ui-iggrid-nextpage ui-iggrid-paging-item ui-state-default" 
+               title="Next page" tabindex="0">…</div>
+        
+        When disabled (last page), igGrid adds "ui-state-disabled" to the class.
         
         Returns:
-            True if successfully clicked, False if button disabled/not found
+            The visible/enabled Next element, or None if not found/disabled
         """
+        # Selectors targeting the div directly (NOT looking for <a> inside)
+        # Ordered from most specific to least specific
+        selectors = [
+            "#grid_pager .ui-iggrid-nextpage",
+            "div.ui-iggrid-nextpage[title='Next page']",
+            ".ui-iggrid-paging .ui-iggrid-nextpage",
+            "//div[@id='grid_pager']//div[contains(@class,'ui-iggrid-nextpage')]",
+        ]
+        
+        for selector in selectors:
+            try:
+                # Use find_elements to get ALL matches
+                if selector.startswith("//"):
+                    elements = self.driver.find_elements(By.XPATH, selector)
+                else:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                
+                for idx, elem in enumerate(elements):
+                    try:
+                        # Check if displayed AND enabled
+                        is_displayed = elem.is_displayed()
+                        is_enabled = elem.is_enabled()
+                        
+                        # Check element class for disabled state
+                        # igGrid adds "ui-state-disabled" when on the last page
+                        elem_class = elem.get_attribute("class") or ""
+                        elem_disabled = "ui-state-disabled" in elem_class
+                        
+                        # Log diagnostics
+                        outer_html = elem.get_attribute("outerHTML") or ""
+                        outer_snippet = outer_html[:150] + "..." if len(outer_html) > 150 else outer_html
+                        
+                        self.logger.debug(
+                            f"Next candidate [{selector}][{idx}]: "
+                            f"displayed={is_displayed}, enabled={is_enabled}, "
+                            f"class='{elem_class}', disabled={elem_disabled}, "
+                            f"html={outer_snippet}"
+                        )
+                        
+                        # Select if visible, enabled, and not disabled
+                        if is_displayed and is_enabled and not elem_disabled:
+                            self.logger.info(
+                                f"Selected Next button: selector='{selector}', index={idx}, "
+                                f"displayed={is_displayed}, disabled={elem_disabled}"
+                            )
+                            return elem
+                        elif elem_disabled:
+                            self.logger.info(
+                                f"Next button found but DISABLED (last page): selector='{selector}'"
+                            )
+                            return None  # Explicitly return None - we're on last page
+                            
+                    except StaleElementReferenceException:
+                        continue
+                        
+            except Exception as e:
+                self.logger.debug(f"Selector {selector} failed: {e}")
+                continue
+        
+        return None
+    
+    def _click_next_page(self, pager_before: str, first_instrument_before: Optional[str]) -> bool:
+        """
+        Click igGrid 'Next' page button and wait for page to actually change.
+        
+        Strategy - try multiple click methods with SHORT timeouts, fail fast to next method:
+        1. jQuery trigger (igGrid uses jQuery event handlers)
+        2. Keyboard: focus + Enter key
+        3. Mouse events: mousedown + mouseup
+        4. ActionChains click
+        5. Native JS click
+        6. igGrid paging API directly
+        
+        Args:
+            pager_before: Current pager label text (e.g., "1 - 30 of 81 records")
+            first_instrument_before: Current first row instrument # (for change detection)
+        
+        Returns:
+            True if successfully navigated to next page, False otherwise
+        """
+        from selenium.webdriver.common.action_chains import ActionChains
+        from selenium.webdriver.common.keys import Keys
+        
+        # Short timeout for each click attempt - fail fast to try next method
+        CLICK_WAIT_TIMEOUT = 5
+        
+        def check_pager_changed() -> bool:
+            """Check if pager label has changed from initial state."""
+            try:
+                current = self.driver.find_element(By.ID, "grid_pager_label").text.strip()
+                return current != pager_before
+            except Exception:
+                return False
+        
+        def wait_for_pager_change(timeout: int = CLICK_WAIT_TIMEOUT) -> bool:
+            """Wait for pager to change with given timeout."""
+            try:
+                WebDriverWait(self.driver, timeout).until(lambda d: check_pager_changed())
+                return True
+            except TimeoutException:
+                return False
+        
         try:
-            # Try multiple selectors for Next button
-            selectors = [
-                (By.XPATH, "//button[contains(text(), 'Next') or contains(text(), 'next')]"),
-                (By.XPATH, "//a[contains(text(), 'Next') or contains(text(), 'next')]"),
-                (By.CSS_SELECTOR, "button.next"),
-                (By.CSS_SELECTOR, "a.next"),
-            ]
-            
-            next_button = None
-            for by, selector in selectors:
-                try:
-                    next_button = self.driver.find_element(by, selector)
-                    if next_button:
-                        break
-                except NoSuchElementException:
-                    continue
+            # Find the visible Next button
+            next_button = self._find_visible_next_button()
             
             if not next_button:
-                self.logger.info("Next button not found")
+                self.logger.info("No visible/enabled Next button found - may be last page")
                 return False
             
-            # Check if disabled
-            if "disabled" in next_button.get_attribute("class") or not next_button.is_enabled():
-                self.logger.info("Next button is disabled (last page)")
-                return False
+            pager_changed = False
             
-            # Get first row's instrument number before clicking (for wait condition)
-            first_row_instrument = None
-            try:
-                first_row = self.driver.find_element(By.CSS_SELECTOR, "table tbody tr:first-child")
-                first_cell = first_row.find_element(By.TAG_NAME, "td")
-                first_row_instrument = first_cell.text.strip()
-            except Exception:
-                pass
-            
-            # Click Next
-            next_button.click()
-            self.logger.info("Clicked Next button")
-            
-            # Wait for page change (first row instrument number changes)
-            if first_row_instrument:
+            # ============================================================
+            # METHOD 1: jQuery trigger (igGrid uses jQuery event handlers)
+            # ============================================================
+            if not pager_changed:
                 try:
-                    WebDriverWait(self.driver, self.PAGE_TIMEOUT).until(
-                        lambda d: (
-                            d.find_element(By.CSS_SELECTOR, "table tbody tr:first-child td").text.strip()
-                            != first_row_instrument
-                        )
-                    )
-                    self.logger.debug("Page content changed (row data updated)")
-                except TimeoutException:
-                    self.logger.warning("Timeout waiting for page change - continuing anyway")
+                    self.logger.info("Method 1: jQuery trigger click...")
+                    self.driver.execute_script("""
+                        var el = arguments[0];
+                        if (window.jQuery || window.$) {
+                            var $ = window.jQuery || window.$;
+                            $(el).trigger('click');
+                        }
+                    """, next_button)
+                    self._wait_for_loading_complete()
+                    if wait_for_pager_change():
+                        pager_changed = True
+                        self.logger.info("Method 1 (jQuery trigger) succeeded!")
+                    else:
+                        self.logger.debug("Method 1 (jQuery trigger) - pager didn't change")
+                except Exception as e:
+                    self.logger.debug(f"Method 1 (jQuery trigger) failed: {e}")
             
-            # Respectful delay
+            # ============================================================
+            # METHOD 2: Keyboard - focus + Enter key
+            # ============================================================
+            if not pager_changed:
+                try:
+                    self.logger.info("Method 2: Keyboard (focus + Enter)...")
+                    # Re-find button in case it became stale
+                    next_button = self._find_visible_next_button()
+                    if next_button:
+                        # Focus the element
+                        self.driver.execute_script("arguments[0].focus();", next_button)
+                        time.sleep(0.1)
+                        # Send Enter key
+                        next_button.send_keys(Keys.ENTER)
+                        self._wait_for_loading_complete()
+                        if wait_for_pager_change():
+                            pager_changed = True
+                            self.logger.info("Method 2 (Keyboard Enter) succeeded!")
+                        else:
+                            self.logger.debug("Method 2 (Keyboard Enter) - pager didn't change")
+                except Exception as e:
+                    self.logger.debug(f"Method 2 (Keyboard) failed: {e}")
+            
+            # ============================================================
+            # METHOD 3: Mouse events (mousedown + mouseup)
+            # ============================================================
+            if not pager_changed:
+                try:
+                    self.logger.info("Method 3: Mouse events (mousedown + mouseup)...")
+                    next_button = self._find_visible_next_button()
+                    if next_button:
+                        self.driver.execute_script("""
+                            var el = arguments[0];
+                            var evtDown = new MouseEvent('mousedown', {bubbles: true, cancelable: true, view: window});
+                            var evtUp = new MouseEvent('mouseup', {bubbles: true, cancelable: true, view: window});
+                            var evtClick = new MouseEvent('click', {bubbles: true, cancelable: true, view: window});
+                            el.dispatchEvent(evtDown);
+                            el.dispatchEvent(evtUp);
+                            el.dispatchEvent(evtClick);
+                        """, next_button)
+                        self._wait_for_loading_complete()
+                        if wait_for_pager_change():
+                            pager_changed = True
+                            self.logger.info("Method 3 (Mouse events) succeeded!")
+                        else:
+                            self.logger.debug("Method 3 (Mouse events) - pager didn't change")
+                except Exception as e:
+                    self.logger.debug(f"Method 3 (Mouse events) failed: {e}")
+            
+            # ============================================================
+            # METHOD 4: ActionChains (Selenium human-like click)
+            # ============================================================
+            if not pager_changed:
+                try:
+                    self.logger.info("Method 4: ActionChains click...")
+                    next_button = self._find_visible_next_button()
+                    if next_button:
+                        actions = ActionChains(self.driver)
+                        actions.move_to_element(next_button).pause(0.2).click().perform()
+                        self._wait_for_loading_complete()
+                        if wait_for_pager_change():
+                            pager_changed = True
+                            self.logger.info("Method 4 (ActionChains) succeeded!")
+                        else:
+                            self.logger.debug("Method 4 (ActionChains) - pager didn't change")
+                except Exception as e:
+                    self.logger.debug(f"Method 4 (ActionChains) failed: {e}")
+            
+            # ============================================================
+            # METHOD 5: Native JavaScript click
+            # ============================================================
+            if not pager_changed:
+                try:
+                    self.logger.info("Method 5: Native JS click...")
+                    next_button = self._find_visible_next_button()
+                    if next_button:
+                        self.driver.execute_script("arguments[0].click();", next_button)
+                        self._wait_for_loading_complete()
+                        if wait_for_pager_change():
+                            pager_changed = True
+                            self.logger.info("Method 5 (JS click) succeeded!")
+                        else:
+                            self.logger.debug("Method 5 (JS click) - pager didn't change")
+                except Exception as e:
+                    self.logger.debug(f"Method 5 (JS click) failed: {e}")
+            
+            # ============================================================
+            # METHOD 6: igGrid Paging API directly
+            # ============================================================
+            if not pager_changed:
+                try:
+                    self.logger.info("Method 6: igGrid Paging API...")
+                    # Try multiple igGrid API approaches
+                    api_scripts = [
+                        '$("#grid_container").igGridPaging("pageIndex", $("#grid_container").igGridPaging("pageIndex") + 1);',
+                        '$("#grid").igGridPaging("pageIndex", $("#grid").igGridPaging("pageIndex") + 1);',
+                        'var grid = $("#grid_container").data("igGrid"); if(grid && grid.dataBind) { var pg = grid.element.data("igGridPaging"); if(pg) pg.pageIndex(pg.pageIndex() + 1); }',
+                    ]
+                    for script in api_scripts:
+                        try:
+                            self.driver.execute_script(script)
+                            self._wait_for_loading_complete()
+                            time.sleep(0.5)
+                            if check_pager_changed():
+                                pager_changed = True
+                                self.logger.info(f"Method 6 (igGrid API) succeeded!")
+                                break
+                        except Exception:
+                            continue
+                    if not pager_changed:
+                        self.logger.debug("Method 6 (igGrid API) - pager didn't change")
+                except Exception as e:
+                    self.logger.debug(f"Method 6 (igGrid API) failed: {e}")
+            
+            # ============================================================
+            # Final check
+            # ============================================================
+            if not pager_changed:
+                pager_current = self.driver.find_element(By.ID, "grid_pager_label").text.strip()
+                self.logger.error(
+                    f"All 6 pagination methods failed! "
+                    f"pager_before='{pager_before}', pager_current='{pager_current}'"
+                )
+                
+                # Take screenshot for debugging
+                try:
+                    screenshot_path = f"outputs/pagination_fail_{int(time.time())}.png"
+                    self.driver.save_screenshot(screenshot_path)
+                    self.logger.error(f"Screenshot saved: {screenshot_path}")
+                except Exception:
+                    pass
+                
+                return False
+            
+            # Log successful pager change
+            pager_after = self.driver.find_element(By.ID, "grid_pager_label").text.strip()
+            self.logger.info(f"Pager changed: '{pager_before}' → '{pager_after}'")
+            
+            # Wait for first row instrument to change (ensures grid data refreshed)
+            # The pager label can update before rows repaint
+            if first_instrument_before:
+                try:
+                    self.logger.debug(f"Waiting for first row instrument to change from '{first_instrument_before}'...")
+                    WebDriverWait(self.driver, self.PAGE_TIMEOUT).until(
+                        lambda d: self._get_first_row_instrument() != first_instrument_before
+                    )
+                    new_first_instrument = self._get_first_row_instrument()
+                    self.logger.info(f"First row instrument changed: '{first_instrument_before}' → '{new_first_instrument}'")
+                except TimeoutException:
+                    self.logger.warning(
+                        f"First row instrument still '{first_instrument_before}' after {self.PAGE_TIMEOUT}s - "
+                        f"data may be stale, but continuing..."
+                    )
+            
+            # Give igGrid a moment to fully render new page data
             time.sleep(self.REQUEST_DELAY)
             
             return True
             
         except Exception as e:
-            self.logger.error(f"Error clicking next page: {e}")
+            self.logger.error(f"Error clicking next page: {type(e).__name__}: {e}")
             return False
+    
+    def _parse_pager_label(self) -> tuple[int, int, int]:
+        """
+        Parse the pager label to get (start, end, total) record numbers.
+        
+        Returns:
+            (start, end, total) tuple, or (0, 0, 0) if parsing fails
+        """
+        try:
+            pager_label = self.driver.find_element(By.ID, "grid_pager_label")
+            pager_text = pager_label.text.strip()
+            
+            # Parse "1 - 30 of 81 records" format
+            match = re.search(r'^\s*(\d+)\s*-\s*(\d+)\s+of\s+(\d+)\s+records?\s*$', pager_text, re.IGNORECASE)
+            
+            if match:
+                start = int(match.group(1))
+                end = int(match.group(2))
+                total = int(match.group(3))
+                return start, end, total
+            
+            return 0, 0, 0
+            
+        except Exception as e:
+            self.logger.debug(f"Error parsing pager label: {e}")
+            return 0, 0, 0
     
     def _handle_pagination(self, all_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Handle pagination and collect all results across multiple pages.
+        
+        Uses pager label parsing (end >= total) as the authoritative stop condition,
+        NOT an internal page counter.
         
         Args:
             all_rows: Initial rows from first page
@@ -708,45 +1022,68 @@ class SeminoleScraper:
             Complete list of all rows from all pages
         """
         start_time = time.time()
-        current_page = 1
+        page_count = 1  # Just for logging
+        previous_first_instrument = self._get_first_row_instrument()
         
         while True:
             # Check total runtime limit
             if time.time() - start_time > self.TOTAL_RUNTIME_LIMIT:
                 self.logger.error(
-                    f"Hit maximum runtime of {self.TOTAL_RUNTIME_LIMIT}s after {current_page} pages"
+                    f"Hit maximum runtime of {self.TOTAL_RUNTIME_LIMIT}s after {page_count} pages"
                 )
                 break
             
-            # Get pagination info
-            current_page_num, total_pages = self._get_pagination_info()
-            self.logger.info(f"On page {current_page_num} of {total_pages}")
+            # Parse pager label to determine if we're on the last page
+            # This is the AUTHORITATIVE stop condition
+            start, end, total = self._parse_pager_label()
+            self.logger.info(f"Pager: {start} - {end} of {total} records (page {page_count})")
             
-            # Check if we're on the last page
-            if current_page_num >= total_pages:
-                self.logger.info(f"Reached last page ({current_page_num} of {total_pages})")
+            # Stop condition: end >= total means we're showing the last records
+            if end >= total:
+                self.logger.info(f"Reached last page (showing records {start}-{end} of {total})")
                 break
             
-            # Try to click Next
-            if not self._click_next_page():
+            # Safety: if total is 0 or invalid, stop
+            if total == 0:
+                self.logger.warning("Pager shows 0 total records - stopping pagination")
+                break
+            
+            # Get current state BEFORE clicking (for change detection)
+            pager_before = self.driver.find_element(By.ID, "grid_pager_label").text.strip()
+            first_instrument_before = self._get_first_row_instrument()
+            
+            # Try to click Next - pass current state for deterministic wait
+            if not self._click_next_page(pager_before, first_instrument_before):
                 self.logger.info("Could not navigate to next page - ending pagination")
                 break
             
-            current_page += 1
+            page_count += 1
             
             # Extract rows from new page
             try:
                 page_rows = self._extract_page_results()
+                
+                # Safety check: verify we got different data (prevent infinite loop)
+                current_first_instrument = self._get_first_row_instrument()
+                if current_first_instrument == previous_first_instrument:
+                    self.logger.error(
+                        f"Data didn't change after pagination! "
+                        f"First instrument still '{current_first_instrument}' - stopping to prevent infinite loop"
+                    )
+                    break
+                
+                previous_first_instrument = current_first_instrument
                 all_rows.extend(page_rows)
                 self.logger.info(
-                    f"Page {current_page}: collected {len(page_rows)} rows "
+                    f"Page {page_count}: collected {len(page_rows)} rows "
                     f"(total: {len(all_rows)})"
                 )
+                
             except TimeoutException:
-                self.logger.error(f"Page {current_page} timed out - stopping pagination")
+                self.logger.error(f"Page {page_count} timed out - stopping pagination")
                 break
             except Exception as e:
-                self.logger.error(f"Error on page {current_page}: {e}")
+                self.logger.error(f"Error on page {page_count}: {e}")
                 break
         
         return all_rows
