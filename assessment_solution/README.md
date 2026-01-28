@@ -24,12 +24,10 @@
 assessment_solution/
 ├── src/
 │   ├── pattern_analyzer.py       # Task 1: County pattern analysis
-│   ├── seminole_scraper.py       # Task 2: FL county scraper
-│   └── test_seminole_scraper.py  # Task 2: Test runner
+│   └── seminole_scraper.py       # Task 2: FL county scraper (includes --run-tests)
 ├── outputs/
 │   ├── county_patterns.json      # Task 1: Analysis results
-│   ├── seminole_test_results.json # Task 2: Scraped FL records
-│   └── test_summary.json         # Task 2: Test metrics (supplemental)
+│   └── seminole_test_results.json # Task 2: Scraped FL records (ONLY output file)
 ├── requirements.txt               # Python dependencies
 ├── pyproject.toml                # Code formatting/linting configuration
 └── README.md                     # This file
@@ -341,14 +339,14 @@ python src/pattern_analyzer.py
 python src/seminole_scraper.py --name "SMITH JOHN"
 # Output: outputs/seminole_test_results.json
 
-# 4. Run Task 2 - All test cases
-python src/test_seminole_scraper.py
-# Output: outputs/seminole_test_results.json + test_summary.json
+# 4. Run Task 2 - Full test suite (3 predefined test cases)
+python src/seminole_scraper.py --run-tests
+# Output: outputs/seminole_test_results.json (contains all 3 tests + validations)
 ```
 
 **Expected:** 
 - Task 1: Processes 13,886 records in 5-10 seconds
-- Task 2: Performance varies by result size (100-150 records/minute typical)
+- Task 2: Test suite completes in ~2-3 minutes (97 total records across 3 tests)
 
 ---
 
@@ -371,7 +369,7 @@ Task 2 implements a production-grade web scraper for Seminole County, Florida of
 The scraper uses **Selenium WebDriver** with Chrome to interact with the dynamic DuProcess WebInquiry system:
 
 ```
-User Input (Name) 
+User Input (Name or --run-tests) 
     ↓
 Accept Disclaimer ("AGREED & ENTER")
     ↓
@@ -385,7 +383,9 @@ Pagination Loop → Next Page
     ↓
 Transform to NC Schema
     ↓
-Output JSON Array
+Run Validations
+    ↓
+Output JSON (outputs/seminole_test_results.json)
 ```
 
 #### 2. Key Implementation Details
@@ -521,19 +521,29 @@ This scraper follows a **schema-first, conservative approach**:
 
 ### Test Results Summary
 
-**Test Cases:**
-1. **Smith john C** - Large result set (80 records expected, 3 pages)
-2. **Smith john JR** - Moderate result set (16 records expected, 1 page)
-3. **XYZ ABC** - Zero results (validates no-results flow/ False positive check)
+**Test Cases (run via `--run-tests`):**
 
+| # | Test Name | Expected | Actual | Pages | Status |
+|---|-----------|----------|--------|-------|--------|
+| 1 | Smith john jr | 16 | 16 | 1 | ✅ PASS |
+| 2 | Smith john C | 81 | 81 | 3 | ✅ PASS |
+| 3 | XYZ ABC | 0 | 0 | 0 | ✅ PASS |
+
+**Validations performed per test:**
+- Count match (actual == expected)
+- Schema keys (exact 14 NC-schema fields)
+- Null rules (parcel_number, doc_category, book_type, consideration must be null)
+- Uppercase names (grantors/grantees)
+- Date format (ISO 8601 with timezone offset)
+- No URLs in data (document links not retrieved)
+
+**Test Execution Screenshots:**
 
 Init first test:
-
 
 <img width="1034" height="164" alt="image" src="https://github.com/user-attachments/assets/cca4fa12-4955-46ce-8ecb-fea3a97732a9" />
 
 Passed 1st test:
-
 
 <img width="1028" height="168" alt="image" src="https://github.com/user-attachments/assets/97e2ea58-773b-4a86-9b49-13508903f1e5" />
 
@@ -553,33 +563,37 @@ Passed the 3rd test (No false positive):
 
 <img width="1075" height="122" alt="image" src="https://github.com/user-attachments/assets/01e85e49-10cd-4fec-9efb-5c23c7810f3a" />
 
-
-Over All:
+Overall:
 
 <img width="655" height="54" alt="image" src="https://github.com/user-attachments/assets/f1731937-f52d-465d-82e3-5ed457d24b94" />
 
 
 
-
-
-
-
-**Note:** Actual test execution requires running `python src/test_seminole_scraper.py` or individual searches via CLI. Performance depends on site responsiveness and result set sizes.
+**Run the test suite:**
+```bash
+python src/seminole_scraper.py --run-tests
+# Output: outputs/seminole_test_results.json (contains all 3 tests with validations)
+```
 
 ### Usage
 
 #### Command-Line Interface
 
 ```bash
+# Run the full test suite (3 predefined test cases)
+python src/seminole_scraper.py --run-tests
+
 # Single name search
-python src/seminole_scraper.py --name "SMITH JOHN" --output outputs/seminole_test_results.json
+python src/seminole_scraper.py --name "SMITH JOHN"
 
 # Headless mode (no browser window)
-python src/seminole_scraper.py --name "JONES, WILLIAM S" --headless
+python src/seminole_scraper.py --name "SMITH JOHN" --headless
 
-# Run all test cases
-python src/test_seminole_scraper.py
+# Headless test suite
+python src/seminole_scraper.py --run-tests --headless
 ```
+
+> **Note:** The `--output` argument exists for backwards compatibility but is **ignored**. Output is always written to `outputs/seminole_test_results.json`.
 
 #### Python API
 
@@ -590,44 +604,137 @@ from seminole_scraper import SeminoleScraper
 scraper = SeminoleScraper(headless=True)
 
 try:
-    # Search by name
+    # Search by name - returns List[Dict] of NC-schema objects
     records = scraper.search_by_name("SMITH JOHN")
-    
-    # records is a List[Dict] of NC-schema objects
     print(f"Found {len(records)} records")
-    
 finally:
     scraper.close()
 ```
 
-### Output Format
+### Output Format (Single Output File)
 
-**File:** `outputs/seminole_test_results.json`
+**File:** `outputs/seminole_test_results.json` — the **ONLY** output artifact for Task 2.
 
-**Structure:** Plain JSON array of NC-schema records (NO metadata wrapper)
+**Top-level structure:** Always a JSON **object wrapper** (never a plain array), containing:
+- `generated_at` — ISO 8601 timestamp with timezone
+- `county`, `state` — metadata
+- `tests` — array of test/search runs
+- `summary` — aggregated pass/fail counts
+
+> **Clarification:** The assignment requirement "same JSON format as NC dataset" refers to **each record** inside `tests[].records[]`, not the top-level wrapper.
+
+---
+
+#### Example A: Single Search Mode (`--name "SMITH JOHN"`)
 
 ```json
-[
-  {
-    "instrument_number": "20240012345",
-    "parcel_number": null,
-    "county": "seminole",
-    "state": "FL",
-    "book": "1234",
-    "page": "567",
-    "doc_type": "WARRANTY DEED",
-    "doc_category": null,
-    "original_doc_type": "WD",
-    "book_type": null,
-    "grantors": ["SMITH JOHN"],
-    "grantees": ["JONES MARY"],
-    "date": "2024-01-15T20:00:00-05:00",
-    "consideration": null
-  }
-]
+{
+  "generated_at": "2026-01-28T12:34:56-05:00",
+  "county": "seminole",
+  "state": "FL",
+  "tests": [
+    {
+      "name": "SMITH JOHN",
+      "expected_count": null,
+      "actual_count": 42,
+      "validations": {
+        "count_match": true,
+        "schema_keys_ok": true,
+        "nulls_ok": true,
+        "uppercase_names_ok": true,
+        "date_timezone_ok": true,
+        "no_links_ok": true,
+        "errors": []
+      },
+      "records": [ /* 42 NC-schema record objects */ ]
+    }
+  ],
+  "summary": { "passed": 1, "failed": 0 }
+}
 ```
 
-**Critical:** Output is a plain array matching NC dataset format exactly. Test summary/metrics are saved separately in `test_summary.json` for documentation purposes.
+- `tests` array contains **1 entry**
+- `expected_count` is `null` (no predefined expectation for ad-hoc searches)
+
+---
+
+#### Example B: Test Suite Mode (`--run-tests`)
+
+```json
+{
+  "generated_at": "2026-01-28T12:34:56-05:00",
+  "county": "seminole",
+  "state": "FL",
+  "tests": [
+    { "name": "Smith john jr", "expected_count": 16, "actual_count": 16, "validations": { "count_match": true, ... }, "records": [ /* 16 records */ ] },
+    { "name": "Smith john C",  "expected_count": 81, "actual_count": 81, "validations": { "count_match": true, ... }, "records": [ /* 81 records */ ] },
+    { "name": "XYZ ABC",       "expected_count": 0,  "actual_count": 0,  "validations": { "count_match": true, ... }, "records": [] }
+  ],
+  "summary": { "passed": 3, "failed": 0 }
+}
+```
+
+- `tests` array contains **3 entries** (one per predefined test case)
+- `expected_count` matches predefined values: 16, 81, 0
+- `summary` aggregates all test results
+
+---
+
+#### Record Schema (NC-Compatible)
+
+Each object in `tests[].records[]` has **exactly 14 keys** matching the NC dataset format:
+
+```json
+{
+  "instrument_number": "20240012345",
+  "parcel_number": null,
+  "county": "seminole",
+  "state": "FL",
+  "book": "1234",
+  "page": "567",
+  "doc_type": "WARRANTY DEED",
+  "doc_category": null,
+  "original_doc_type": "WD",
+  "book_type": null,
+  "grantors": ["SMITH JOHN"],
+  "grantees": ["JONES MARY"],
+  "date": "2024-01-15T20:00:00-05:00",
+  "consideration": null
+}
+```
+
+- **14 exact keys** — no more, no less
+- Fields not available on the Seminole website → `null`
+- Names normalized to **UPPERCASE**
+- Dates in **ISO 8601 with timezone offset** (e.g., `-05:00`)
+
+### Why Extra Grid Columns Are Not Stored
+
+The Seminole County results grid contains additional columns (e.g., "Description", "Verified Status") that have **no corresponding field in the NC schema**. These columns are intentionally NOT persisted because:
+
+1. **Schema fidelity:** Output must match the NC dataset format exactly (14 keys)
+2. **No schema extension:** We do not add extra keys beyond the NC specification
+3. **Conservative approach:** If a field isn't in the target schema, we don't store it
+
+We extract all columns needed to populate the NC schema fields. Columns without NC-schema mappings are read from the DOM but discarded during transformation.
+
+### Logging & Debug Artifacts
+
+**Logging:**
+- All scraping activity is logged to **stdout (console)** at **INFO level**
+- Includes: navigation, disclaimer handling, form fill, search click, grid ready, per-page pager status, pagination transitions, extracted counts, retries/timeouts, final RPM
+- Log format: `[YYYY-MM-DD HH:MM:SS] [LEVEL] message`
+
+**Debug Screenshots:**
+- By default, **NO screenshots or extra files** are written
+- Screenshots are disabled unless explicitly enabled via:
+  - Class attribute: `DEBUG_ARTIFACTS = True`
+  - Environment variable: `SEMINOLE_DEBUG_ARTIFACTS=1`
+- When enabled, debug screenshots are saved to `outputs/` on errors only
+
+**Single Output File:**
+- The **only** output artifact is `outputs/seminole_test_results.json`
+- No supplementary files (e.g., no separate test_summary.json)
 
 ### Dependencies
 
