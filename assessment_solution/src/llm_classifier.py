@@ -44,15 +44,25 @@ class DocTypeClassifier:
         
         # Pass 1 Rules (Regex)
         self.rules = {
-            "SALE_DEED": [r"\bDEED\b", r"\bWARRANTY\b", r"\bQUIT\s*CLAIM\b", r"\bCONVEYANCE\b"],
+            "SALE_DEED": [r"\bWARRANTY\s+DEED\b", r"\bQUIT\s*CLAIM\b", r"\bGRANT\s+DEED\b", r"\bDEED\b", r"\bCONVEYANCE\b"],
             "MORTGAGE": [r"\bMORTGAGE\b", r"\bMTG\b"],
             "DEED_OF_TRUST": [r"\bDEED\s+OF\s+TRUST\b", r"\bDOT\b", r"\bTRUST\s+DEED\b"],
             "RELEASE": [r"\bRELEASE\b", r"\bSATISFACTION\b", r"\bRECONVEYANCE\b", r"\bDISCHARGE\b"],
             "LIEN": [r"\bLIEN\b", r"\bUCC\b", r"\bMECHANIC\b"],
-            "PLAT": [r"\bPLAT\b", r"\bMAP\b", r"\bSURVEY\b"],
-            "EASEMENT": [r"\bEASEMENT\b", r"\bRIGHT\s+OF\s+WAY\b", r"\bROW\b", r"\bR/W\b"],
+            "PLAT": [r"\bPLAT\b", r"\bSURVEY\b"],
+            "EASEMENT": [r"\bEASEMENT\b", r"\bRIGHT\s+OF\s+WAY\b", r"\bROW\b", r"(?:^|\s)R/W(?:\s|$)"],
             "LEASE": [r"\bLEASE\b"]
         }
+
+        # Usage Tracking
+        self.usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "calls": 0
+        }
+        # GPT-4o-mini pricing as of Jan 2026 (approximate)
+        self.PRICE_PER_1M_PROMPT = 0.15
+        self.PRICE_PER_1M_COMPLETION = 0.60
 
     def extract_unique_doc_types(self, file_path: str) -> Tuple[Dict[str, int], int]:
         """Step 0: Extract unique doc_type values and frequencies."""
@@ -122,8 +132,13 @@ class DocTypeClassifier:
         system_prompt = (
             "You are a legal document classifier. Classify the following document types "
             f"into exactly one of these categories: {categories_str}. "
-            "Return JSON only, as a list of objects: [{\"doc_type\": \"...\", \"category\": \"...\", \"confidence\": 0.0-1.0}]. "
-            "Do not include any prose."
+            "Return a JSON object with a 'results' key containing a list of objects: "
+            "[{\"doc_type\": \"...\", \"category\": \"...\", \"confidence\": 0.0-1.0}]. "
+            "\n\nCRITICAL CONSTRAINTS:"
+            "\n1. Return doc_type EXACTLY as provided (verbatim). Do not modify whitespace, casing, or punctuation."
+            f"\n2. category MUST be exactly one of: {categories_str}."
+            "\n3. confidence MUST be a numeric value between 0.0 and 1.0."
+            "\n4. Output JSON object only, no markdown or prose."
         )
         
         if use_prototypes:
@@ -142,15 +157,16 @@ class DocTypeClassifier:
                 response_format={"type": "json_object"},
                 temperature=0
             )
+            
+            # Track Usage
+            if hasattr(response, 'usage') and response.usage:
+                self.usage["prompt_tokens"] += response.usage.prompt_tokens
+                self.usage["completion_tokens"] += response.usage.completion_tokens
+            self.usage["calls"] += 1
+
             content = response.choices[0].message.content
             data = json.loads(content)
-            # Handle both list and object wrapping
-            if isinstance(data, dict):
-                # Look for a list inside the dict
-                for val in data.values():
-                    if isinstance(val, list):
-                        return val
-            return data if isinstance(data, list) else []
+            return data.get("results", [])
         except Exception as e:
             logger.error(f"LLM call failed: {e}")
             return []
@@ -166,11 +182,24 @@ class DocTypeClassifier:
             batch = unresolved[i:i+batch_size]
             results = self.call_llm(batch, use_prototypes=use_prototypes)
             
-            # Map results back
-            batch_results = {res.get("doc_type"): res for res in results if "doc_type" in res}
+            # Map results back with verbatim and normalized fallbacks
+            batch_results = {}
+            normalized_batch_results = {}
+            
+            for res in results:
+                raw_dt = res.get("doc_type")
+                if raw_dt:
+                    batch_results[raw_dt] = res
+                    normalized_batch_results[self.normalize(raw_dt)] = res
             
             for raw_type in batch:
+                # 1. Try verbatim match
                 res = batch_results.get(raw_type)
+                
+                # 2. Try normalized fallback if verbatim fails
+                if not res:
+                    res = normalized_batch_results.get(self.normalize(raw_type))
+                
                 if res and res.get("category") in CATEGORIES and res.get("confidence", 0) >= threshold:
                     resolved[raw_type] = res["category"]
                 else:
@@ -187,11 +216,18 @@ class DocTypeClassifier:
         # Step 1
         resolved_p1, unresolved_p1 = self.pass1_rules(unique_types)
         
-        # Step 2a
-        resolved_p2a, unresolved_p2a = self.pass2_llm(unresolved_p1, THRESH_A, use_prototypes=False)
+        # Step 2: LLM Passes
+        resolved_p2a = {}
+        resolved_p2b = {}
         
-        # Step 2b
-        resolved_p2b, unresolved_p2b = self.pass2_llm(unresolved_p2a, THRESH_B, use_prototypes=True)
+        if self.client and self.api_key and "YOUR_API_KEY_HERE" not in self.api_key:
+            # Step 2a
+            resolved_p2a, unresolved_p2a = self.pass2_llm(unresolved_p1, THRESH_A, use_prototypes=False)
+            
+            # Step 2b
+            resolved_p2b, unresolved_p2b = self.pass2_llm(unresolved_p2a, THRESH_B, use_prototypes=True)
+        else:
+            logger.info("Skipping LLM passes; missing or placeholder API key.")
         
         # Final Assembly
         final_mapping = {}
@@ -229,8 +265,17 @@ class DocTypeClassifier:
         p2b_weighted = get_weighted(p2b)
         misc_weighted = sum(counts[rt] for rt, cat in final.items() if cat == "MISC")
         
-        report = f"""
-# Doc Type Classification Report
+        # Cost Calculation
+        cost = (self.usage["prompt_tokens"] / 1_000_000 * self.PRICE_PER_1M_PROMPT) + \
+               (self.usage["completion_tokens"] / 1_000_000 * self.PRICE_PER_1M_COMPLETION)
+
+        report_content = f"""
+### ✅ Task 3: Document Type Classification (COMPLETE)
+**Script:** `src/llm_classifier.py`  
+**Output:** `outputs/doc_type_mapping.json`  
+**Objective:** Standardize messy `doc_type` values into 9 canonical categories using a multi-pass pipeline (Regex + LLM).
+
+#### 📋 Task 3: Methodology & Report
 
 ## Coverage Metrics (Unique Types)
 - Total Unique Doc Types: {unique_count}
@@ -243,15 +288,40 @@ class DocTypeClassifier:
 - Non-MISC Coverage: {(p1_weighted + p2a_weighted + p2b_weighted)/total_records:.1%}
 - MISC Coverage: {misc_weighted/total_records:.1%}
 
+## LLM Usage & Estimated Cost
+- Total LLM Calls: {self.usage['calls']}
+- Prompt Tokens: {self.usage['prompt_tokens']}
+- Completion Tokens: {self.usage['completion_tokens']}
+- Estimated Cost: ${cost:.4f} (using assumed GPT-4o-mini rates; verify current pricing)
+
 ## Methodology
 1. **Pass 1 (High-Precision Rules)**: Regex-based matching. Ambiguous matches (multiple categories) are deferred.
 2. **Pass 2a (LLM Batch)**: GPT-4o-mini classification with THRESH_A={THRESH_A}.
 3. **Pass 2b (LLM Calibration)**: GPT-4o-mini with canonical prototypes and THRESH_B={THRESH_B}.
 4. **Fallback**: Anything below thresholds or invalid is mapped to MISC.
 """
-        print(report)
-        with open("assessment_solution/README.md", "a", encoding="utf-8") as f:
-            f.write(report)
+        # Stable README update using markers
+        readme_path = "assessment_solution/README.md"
+        if os.path.exists(readme_path):
+            with open(readme_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            
+            start_marker = "<!-- REPORT_START -->"
+            end_marker = "<!-- REPORT_END -->"
+            
+            new_report_block = f"{start_marker}\n{report_content}\n{end_marker}"
+            
+            if start_marker in content and end_marker in content:
+                # Replace existing block
+                pattern = re.compile(f"{re.escape(start_marker)}.*?{re.escape(end_marker)}", re.DOTALL)
+                new_content = pattern.sub(new_report_block, content)
+            else:
+                # Append to the end
+                new_content = content.rstrip() + "\n\n" + new_report_block + "\n"
+            
+            with open(readme_path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+            logger.info(f"Report updated in {readme_path}")
 
 if __name__ == "__main__":
     classifier = DocTypeClassifier()
