@@ -785,25 +785,42 @@ RPM(N) = 60N / (t₀ + αN)
 
 ## Coverage Metrics (Unique Types)
 - Total Unique Doc Types: 339
-- Resolved by Pass 1 (Rules): 71 (20.9%)
-- Resolved by Pass 2a (LLM): 20 (5.9%)
-- Resolved by Pass 2b (LLM+Proto): 1 (0.3%)
-- Finalized as MISC: 247 (72.9%)
+- Resolved by Pass 1 (Rules): 95 (28.0%)
+- Resolved by Pass 2a (LLM): 16 (4.7%)
+- Resolved by Pass 2b (LLM+Proto): 4 (1.2%)
+- Finalized as MISC: 224 (66.1%)
 
 ## Coverage Metrics (Total Records - 13886)
-- Non-MISC Coverage: 72.0%
-- MISC Coverage: 28.0%
+- Non-MISC Coverage: 79.0%
+- MISC Coverage: 21.0%
 
 ## LLM Usage & Estimated Cost
-- Total LLM Calls: 11
-- Prompt Tokens: 5666
-- Completion Tokens: 11376
-- Estimated Cost: $0.0077 (using assumed GPT-4o-mini rates; verify current pricing)
+- Total LLM Calls: 10
+- Prompt Tokens: 5921
+- Completion Tokens: 15495
+- Estimated Cost: $0.0102 (using assumed GPT-4o-mini rates; verify current pricing)
+
+## Top Unresolved by Frequency (After Pass 1)
+- `CANCELLATION` (203 records)
+- `ASSIGNMENT` (193 records)
+- `SUBSTITUTION TRUSTEE` (165 records)
+- `SEE INSTRUMENT` (162 records)
+- `CAN` (138 records)
+- `POWER OF ATTORNEY` (132 records)
+- `AFFIDAVIT` (100 records)
+- `FORECLOSURE` (95 records)
+- `SUB TR` (82 records)
+- `D OF T` (78 records)
+- `MISCELLANEOUS` (75 records)
+- `REL D` (65 records)
+- `ESMT` (56 records)
+- `Restrictions` (54 records)
+- `UNIFORM COMMERCIAL CODE` (52 records)
 
 ## Methodology
 1. **Pass 1 (High-Precision Rules)**: Regex-based matching. Ambiguous matches (multiple categories) are deferred.
-2. **Pass 2a (LLM Batch)**: GPT-4o-mini classification with THRESH_A=0.85.
-3. **Pass 2b (LLM Calibration)**: GPT-4o-mini with canonical prototypes and THRESH_B=0.85.
+2. **Pass 2a (LLM Batch)**: GPT-4o-mini classification accepting only certainty='HIGH'.
+3. **Pass 2b (LLM Calibration)**: GPT-4o-mini with canonical prototypes accepting certainty in ['HIGH', 'MEDIUM'].
 4. **Fallback**: Anything below thresholds or invalid is mapped to MISC.
 
 <!-- REPORT_END -->

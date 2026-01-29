@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 DATASET_PATH = "../nc_records_assessment.jsonl"
 MAPPING_OUTPUT_PATH = "outputs/doc_type_mapping.json"
 README_PATH = "README.md"
-THRESH_A = 0.85
-THRESH_B = 0.85
+CERTAINTY_A = "HIGH"
+CERTAINTY_B = ["HIGH", "MEDIUM"]
 
 CATEGORIES = [
     "SALE_DEED", "MORTGAGE", "DEED_OF_TRUST", "RELEASE", 
@@ -48,19 +48,44 @@ class DocTypeClassifier:
         
         if is_valid_api_key(self.api_key):
             self.client = openai.OpenAI(api_key=self.api_key)
+            logger.info("LLM enabled: true")
         else:
             self.client = None
+            logger.info("LLM enabled: false")
             if self.api_key:
                 logger.warning("OPENAI_API_KEY found but appears to be a placeholder or invalid.")
         
         # Pass 1 Rules (Regex)
         self.rules = {
-            "SALE_DEED": [r"\bWARRANTY\s+DEED\b", r"\bQUIT\s*CLAIM\b", r"\bGRANT\s+DEED\b", r"\bDEED\b", r"\bCONVEYANCE\b"],
+            "SALE_DEED": [
+                r"\bWARRANTY\s+DEED\b", 
+                r"\bQUIT\s*CLAIM\b", 
+                r"\bGRANT\s+DEED\b", 
+                r"\bDEED\b(?!\s+OF\s+TRUST\b)", # Negative lookahead to avoid DOT ambiguity
+                r"\bCONVEYANCE\b"
+            ],
             "MORTGAGE": [r"\bMORTGAGE\b", r"\bMTG\b"],
-            "DEED_OF_TRUST": [r"\bDEED\s+OF\s+TRUST\b", r"\bDOT\b", r"\bTRUST\s+DEED\b"],
-            "RELEASE": [r"\bRELEASE\b", r"\bSATISFACTION\b", r"\bRECONVEYANCE\b", r"\bDISCHARGE\b"],
+            "DEED_OF_TRUST": [
+                r"\bDEED\s+OF\s+TRUST\b", 
+                r"\bDOT\b", 
+                r"\bTRUST\s+DEED\b",
+                r"^(?:DT|D\s*T|D/T)$" # High-impact abbreviations
+            ],
+            "RELEASE": [
+                r"\bRELEASE\b", 
+                r"\bSATISFACTION\b", 
+                r"\bRECONVEYANCE\b", 
+                r"\bDISCHARGE\b",
+                r"^(?:SAT)$", # Exact match for SAT
+                r"\bSAT\b"
+            ],
             "LIEN": [r"\bLIEN\b", r"\bUCC\b", r"\bMECHANIC\b"],
-            "PLAT": [r"\bPLAT\b", r"\bSURVEY\b"],
+            "PLAT": [
+                r"\bPLAT\b", 
+                r"\bSURVEY\b",
+                r"^(?:MAP|MAP/R)$", # Exact match for MAP/R
+                r"\bMAP\b"
+            ],
             "EASEMENT": [r"\bEASEMENT\b", r"\bRIGHT\s+OF\s+WAY\b", r"\bROW\b", r"(?:^|\s)R/W(?:\s|$)"],
             "LEASE": [r"\bLEASE\b"]
         }
@@ -142,14 +167,19 @@ class DocTypeClassifier:
         
         system_prompt = (
             "You are a legal document classifier. Classify the following document types "
-            f"into exactly one of these categories: {categories_str}. "
+            f"into exactly one of these categories: {categories_str}, or 'MISC'. "
             "Return a JSON object with a 'results' key containing a list of objects: "
-            "[{\"doc_type\": \"...\", \"category\": \"...\", \"confidence\": 0.0-1.0}]. "
+            "[{\"doc_type\": \"...\", \"category\": \"...\", \"certainty\": \"HIGH/MEDIUM/LOW\", \"reason\": \"...\"}]. "
+            "\n\nCERTAINTY RUBRIC:"
+            "\n- HIGH: Clear direct match to a category or prototype."
+            "\n- MEDIUM: Plausible classification but not fully explicit."
+            "\n- LOW: Truly unclear or insufficient information. Avoid LOW unless necessary."
             "\n\nCRITICAL CONSTRAINTS:"
             "\n1. Return doc_type EXACTLY as provided (verbatim). Do not modify whitespace, casing, or punctuation."
-            f"\n2. category MUST be exactly one of: {categories_str}."
-            "\n3. confidence MUST be a numeric value between 0.0 and 1.0."
-            "\n4. Output JSON object only, no markdown or prose."
+            f"\n2. category MUST be exactly one of: {categories_str}, or 'MISC'."
+            "\n3. certainty MUST be exactly one of: 'HIGH', 'MEDIUM', or 'LOW'."
+            "\n4. reason MUST be a short explanation (3-7 words)."
+            "\n5. Output JSON object only, no markdown or prose."
         )
         
         if use_prototypes:
@@ -182,7 +212,7 @@ class DocTypeClassifier:
             logger.error(f"LLM call failed: {e}")
             return []
 
-    def pass2_llm(self, unresolved: List[str], threshold: float, use_prototypes: bool = False, batch_size: int = 50) -> Tuple[Dict[str, str], List[str]]:
+    def pass2_llm(self, unresolved: List[str], accepted_certainty: List[str], use_prototypes: bool = False, batch_size: int = 50) -> Tuple[Dict[str, str], List[str]]:
         """Step 2: LLM classification (Pass 2a or 2b)."""
         label = "Pass 2b (Prototypes)" if use_prototypes else "Pass 2a (Batch)"
         logger.info(f"Running {label}...")
@@ -211,7 +241,7 @@ class DocTypeClassifier:
                 if not res:
                     res = normalized_batch_results.get(normalize_doc_type(raw_type))
                 
-                if res and res.get("category") in CATEGORIES and res.get("confidence", 0) >= threshold:
+                if res and res.get("category") in CATEGORIES and res.get("certainty") in accepted_certainty:
                     resolved[raw_type] = res["category"]
                 else:
                     still_unresolved.append(raw_type)
@@ -227,16 +257,24 @@ class DocTypeClassifier:
         # Step 1
         resolved_p1, unresolved_p1 = self.pass1_rules(unique_types)
         
+        # Step 1.5: Identify top unresolved by frequency for README
+        top_unresolved = sorted(
+            [{"doc_type": ut, "count": counts[ut]} for ut in unresolved_p1],
+            key=lambda x: x["count"],
+            reverse=True
+        )
+        top_30 = top_unresolved[:30]
+
         # Step 2: LLM Passes
         resolved_p2a = {}
         resolved_p2b = {}
         
         if self.client:
             # Step 2a
-            resolved_p2a, unresolved_p2a = self.pass2_llm(unresolved_p1, THRESH_A, use_prototypes=False)
+            resolved_p2a, unresolved_p2a = self.pass2_llm(unresolved_p1, [CERTAINTY_A], use_prototypes=False)
             
             # Step 2b
-            resolved_p2b, unresolved_p2b = self.pass2_llm(unresolved_p2a, THRESH_B, use_prototypes=True)
+            resolved_p2b, unresolved_p2b = self.pass2_llm(unresolved_p2a, CERTAINTY_B, use_prototypes=True)
         else:
             logger.info("Skipping LLM passes; missing or placeholder API key.")
         
@@ -258,9 +296,9 @@ class DocTypeClassifier:
         logger.info(f"Mapping saved to {MAPPING_OUTPUT_PATH}")
         
         # Calculate Metrics
-        self.generate_report(counts, total_records, resolved_p1, resolved_p2a, resolved_p2b, final_mapping)
+        self.generate_report(counts, total_records, resolved_p1, resolved_p2a, resolved_p2b, final_mapping, top_30[:15])
 
-    def generate_report(self, counts, total_records, p1, p2a, p2b, final):
+    def generate_report(self, counts, total_records, p1, p2a, p2b, final, top_unresolved):
         unique_count = len(counts)
         p1_count = len(p1)
         p2a_count = len(p2a)
@@ -279,6 +317,9 @@ class DocTypeClassifier:
         # Cost Calculation
         cost = (self.usage["prompt_tokens"] / 1_000_000 * self.PRICE_PER_1M_PROMPT) + \
                (self.usage["completion_tokens"] / 1_000_000 * self.PRICE_PER_1M_COMPLETION)
+
+        # Format top unresolved for README
+        top_unresolved_md = "\n".join([f"- `{item['doc_type']}` ({item['count']} records)" for item in top_unresolved])
 
         report_content = f"""
 ### ✅ Task 3: Document Type Classification (COMPLETE)
@@ -305,10 +346,13 @@ class DocTypeClassifier:
 - Completion Tokens: {self.usage['completion_tokens']}
 - Estimated Cost: ${cost:.4f} (using assumed GPT-4o-mini rates; verify current pricing)
 
+## Top Unresolved by Frequency (After Pass 1)
+{top_unresolved_md}
+
 ## Methodology
 1. **Pass 1 (High-Precision Rules)**: Regex-based matching. Ambiguous matches (multiple categories) are deferred.
-2. **Pass 2a (LLM Batch)**: GPT-4o-mini classification with THRESH_A={THRESH_A}.
-3. **Pass 2b (LLM Calibration)**: GPT-4o-mini with canonical prototypes and THRESH_B={THRESH_B}.
+2. **Pass 2a (LLM Batch)**: GPT-4o-mini classification accepting only certainty='{CERTAINTY_A}'.
+3. **Pass 2b (LLM Calibration)**: GPT-4o-mini with canonical prototypes accepting certainty in {CERTAINTY_B}.
 4. **Fallback**: Anything below thresholds or invalid is mapped to MISC.
 """
         # Stable README update using helper from utils.py
