@@ -1,11 +1,18 @@
-pandas
+# Task 2 (Seminole Scraper) - REQUIRED
+selenium
+webdriver-manager
+pytz
 python-dateutil
+
+# Task 3 (LLM Classifier) - REQUIRED
+openai
+python-dotenv
+
+# Development / Optional
+pandas
 tqdm
 requests
 beautifulsoup4
 lxml
 black
 ruff
-selenium
-webdriver-manager
-pytz
