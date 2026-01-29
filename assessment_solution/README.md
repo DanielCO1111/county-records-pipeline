@@ -786,19 +786,19 @@ RPM(N) = 60N / (t₀ + αN)
 ## Coverage Metrics (Unique Types)
 - Total Unique Doc Types: 339
 - Resolved by Pass 1 (Rules): 71 (20.9%)
-- Resolved by Pass 2a (LLM): 0 (0.0%)
-- Resolved by Pass 2b (LLM+Proto): 0 (0.0%)
-- Finalized as MISC: 268 (79.1%)
+- Resolved by Pass 2a (LLM): 20 (5.9%)
+- Resolved by Pass 2b (LLM+Proto): 1 (0.3%)
+- Finalized as MISC: 247 (72.9%)
 
 ## Coverage Metrics (Total Records - 13886)
-- Non-MISC Coverage: 55.2%
-- MISC Coverage: 44.8%
+- Non-MISC Coverage: 72.0%
+- MISC Coverage: 28.0%
 
 ## LLM Usage & Estimated Cost
-- Total LLM Calls: 0
-- Prompt Tokens: 0
-- Completion Tokens: 0
-- Estimated Cost: $0.0000 (using assumed GPT-4o-mini rates; verify current pricing)
+- Total LLM Calls: 11
+- Prompt Tokens: 5666
+- Completion Tokens: 11376
+- Estimated Cost: $0.0077 (using assumed GPT-4o-mini rates; verify current pricing)
 
 ## Methodology
 1. **Pass 1 (High-Precision Rules)**: Regex-based matching. Ambiguous matches (multiple categories) are deferred.

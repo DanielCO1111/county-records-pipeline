@@ -5,15 +5,22 @@ import logging
 from typing import Dict, List, Set, Tuple, Optional
 from collections import Counter
 import openai
-from dotenv import load_dotenv
+from utils import (
+    load_env_file, 
+    get_env, 
+    is_valid_api_key, 
+    normalize_doc_type, 
+    update_readme_report_block
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Constants
-DATASET_PATH = "nc_records_assessment.jsonl"
-MAPPING_OUTPUT_PATH = "assessment_solution/outputs/doc_type_mapping.json"
+# Constants (Relative to assessment_solution directory)
+DATASET_PATH = "../nc_records_assessment.jsonl"
+MAPPING_OUTPUT_PATH = "outputs/doc_type_mapping.json"
+README_PATH = "README.md"
 THRESH_A = 0.85
 THRESH_B = 0.85
 
@@ -36,11 +43,15 @@ PROTOTYPES = {
 
 class DocTypeClassifier:
     def __init__(self):
-        load_dotenv()
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        if not self.api_key:
-            logger.warning("OPENAI_API_KEY not found in environment variables.")
-        self.client = openai.OpenAI(api_key=self.api_key) if self.api_key else None
+        load_env_file()
+        self.api_key = get_env("OPENAI_API_KEY")
+        
+        if is_valid_api_key(self.api_key):
+            self.client = openai.OpenAI(api_key=self.api_key)
+        else:
+            self.client = None
+            if self.api_key:
+                logger.warning("OPENAI_API_KEY found but appears to be a placeholder or invalid.")
         
         # Pass 1 Rules (Regex)
         self.rules = {
@@ -98,7 +109,7 @@ class DocTypeClassifier:
         unresolved = []
         
         for raw_type in unique_doc_types:
-            norm = self.normalize(raw_type)
+            norm = normalize_doc_type(raw_type)
             if not norm:
                 unresolved.append(raw_type)
                 continue
@@ -124,7 +135,7 @@ class DocTypeClassifier:
     def call_llm(self, doc_types: List[str], use_prototypes: bool = False) -> List[Dict]:
         """Helper to call LLM for a batch of doc_types."""
         if not self.client:
-            logger.error("LLM client not initialized (missing API key).")
+            # Silent return as the pipeline already logs skipping info
             return []
 
         categories_str = ", ".join(CATEGORIES)
@@ -190,7 +201,7 @@ class DocTypeClassifier:
                 raw_dt = res.get("doc_type")
                 if raw_dt:
                     batch_results[raw_dt] = res
-                    normalized_batch_results[self.normalize(raw_dt)] = res
+                    normalized_batch_results[normalize_doc_type(raw_dt)] = res
             
             for raw_type in batch:
                 # 1. Try verbatim match
@@ -198,7 +209,7 @@ class DocTypeClassifier:
                 
                 # 2. Try normalized fallback if verbatim fails
                 if not res:
-                    res = normalized_batch_results.get(self.normalize(raw_type))
+                    res = normalized_batch_results.get(normalize_doc_type(raw_type))
                 
                 if res and res.get("category") in CATEGORIES and res.get("confidence", 0) >= threshold:
                     resolved[raw_type] = res["category"]
@@ -220,7 +231,7 @@ class DocTypeClassifier:
         resolved_p2a = {}
         resolved_p2b = {}
         
-        if self.client and self.api_key and "YOUR_API_KEY_HERE" not in self.api_key:
+        if self.client:
             # Step 2a
             resolved_p2a, unresolved_p2a = self.pass2_llm(unresolved_p1, THRESH_A, use_prototypes=False)
             
@@ -300,28 +311,13 @@ class DocTypeClassifier:
 3. **Pass 2b (LLM Calibration)**: GPT-4o-mini with canonical prototypes and THRESH_B={THRESH_B}.
 4. **Fallback**: Anything below thresholds or invalid is mapped to MISC.
 """
-        # Stable README update using markers
-        readme_path = "assessment_solution/README.md"
-        if os.path.exists(readme_path):
-            with open(readme_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            
-            start_marker = "<!-- REPORT_START -->"
-            end_marker = "<!-- REPORT_END -->"
-            
-            new_report_block = f"{start_marker}\n{report_content}\n{end_marker}"
-            
-            if start_marker in content and end_marker in content:
-                # Replace existing block
-                pattern = re.compile(f"{re.escape(start_marker)}.*?{re.escape(end_marker)}", re.DOTALL)
-                new_content = pattern.sub(new_report_block, content)
-            else:
-                # Append to the end
-                new_content = content.rstrip() + "\n\n" + new_report_block + "\n"
-            
-            with open(readme_path, "w", encoding="utf-8") as f:
-                f.write(new_content)
-            logger.info(f"Report updated in {readme_path}")
+        # Stable README update using helper from utils.py
+        update_readme_report_block(
+            readme_path=README_PATH,
+            start_marker="<!-- REPORT_START -->",
+            end_marker="<!-- REPORT_END -->",
+            report_markdown=report_content
+        )
 
 if __name__ == "__main__":
     classifier = DocTypeClassifier()
