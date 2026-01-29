@@ -783,27 +783,33 @@ RPM(N) = 60N / (t₀ + αN)
 
 #### 📋 Task 3: Methodology & Report
 
+## Sampling Strategy
+We process unique `doc_type` values using a Pareto-based strategic sampling approach:
+- **Pass 1 (Deterministic)**: All 339 unique types are checked against high-precision rules.
+- **Strategic Filter (Pareto)**: Only unresolved types needed to cover 95% of the remaining record volume are sent to the LLM.
+- **Long-tail Handling**: Rare types contributing to the bottom 5% of volume are mapped directly to `MISC` to optimize cost and focus on high-impact records.
+
 ## Coverage Metrics (Unique Doc Types — unweighted)
 *These percentages are out of the 339 unique doc_type strings found in the dataset. Many rare/long-tail types may remain MISC.*
 - **Non-MISC types**: 107 / 339 (31.6%)
 - **MISC types**: 232 / 339 (68.4%)
 - Breakdown by pass:
-    - Resolved by Pass 1 (Rules): 95 (28.0%)
-    - Resolved by Pass 2a (LLM): 10 (2.9%)
-    - Resolved by Pass 2b (LLM+Proto): 2 (0.6%)
+    - Resolved by Pass 1 (Rules): 103 (30.4%)
+    - Resolved by Pass 2a (LLM): 5 (1.5%)
+    - Resolved by Pass 2b (LLM+Proto): 22 (6.5%)
 
 ## Coverage Metrics (All Records — frequency-weighted by occurrence)
 *These percentages are out of the 13,886 total records. A small set of very common doc_type values can cover most records even if many rare types are MISC.*
-- **Non-MISC records**: 10765 / 13886 (77.5%)
-- **MISC records**: 3121 / 13886 (22.5%)
+- **Non-MISC records**: 10889 / 13886 (80.1%)
+- **MISC records**: 2997 / 13886 (21.6%)
 
 > **Note on Metrics**: It’s normal for MISC to be high by unique types but low by records because MISC often contains many low-frequency (long-tail) values that have minimal impact on overall dataset coverage.
 
 ## LLM Usage & Estimated Cost
 - Total LLM Calls: 6
-- Prompt Tokens: 4421
-- Completion Tokens: 15597
-- Estimated Cost: $0.0100 (using assumed GPT-4o-mini rates; verify current pricing)
+- Prompt Tokens: 2995
+- Completion Tokens: 7472
+- Estimated Cost: $0.0049 (using assumed GPT-4o-mini rates; verify current pricing)
 
 ## Top Unresolved by Frequency (After Pass 1)
 - `CANCELLATION` (203 records)
@@ -815,17 +821,17 @@ RPM(N) = 60N / (t₀ + αN)
 - `AFFIDAVIT` (100 records)
 - `FORECLOSURE` (95 records)
 - `SUB TR` (82 records)
-- `D OF T` (78 records)
 - `MISCELLANEOUS` (75 records)
-- `REL D` (65 records)
-- `ESMT` (56 records)
 - `Restrictions` (54 records)
 - `UNIFORM COMMERCIAL CODE` (52 records)
+- `DECLARATION` (50 records)
+- `ASGMT` (46 records)
+- `Covenants and Restrictions` (43 records)
 
 ## Methodology
 1. **Pass 1 (High-Precision Rules)**: Regex-based matching. Ambiguous matches (multiple categories) are deferred.
 2. **Pass 2a (LLM Batch)**: GPT-4o-mini classification accepting only certainty='HIGH'.
 3. **Pass 2b (LLM Calibration)**: GPT-4o-mini with canonical prototypes accepting certainty in ['HIGH', 'MEDIUM'].
-4. **Fallback**: Anything below thresholds or invalid is mapped to MISC.
+4. **Fallback**: Anything below thresholds, invalid, or filtered by strategic sampling is mapped to MISC.
 
 <!-- REPORT_END -->

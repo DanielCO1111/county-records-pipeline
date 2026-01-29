@@ -23,6 +23,9 @@ MAPPING_OUTPUT_PATH = "outputs/doc_type_mapping.json"
 README_PATH = "README.md"
 CERTAINTY_A = "HIGH"
 CERTAINTY_B = ["HIGH", "MEDIUM"]
+FALLBACK_CATEGORY = "MISC"
+TOKENS_PER_MILLION = 1_000_000
+PARETO_THRESHOLD = 0.95 # Target 95% record coverage for strategic sampling
 
 CATEGORIES = [
     "SALE_DEED", "MORTGAGE", "DEED_OF_TRUST", "RELEASE", 
@@ -70,12 +73,18 @@ class DocTypeClassifier:
                 r"\bDEED\b(?!\s+OF\s+TRUST\b)", 
                 r"\bCONVEYANCE\b"
             ],
-            "MORTGAGE": [r"\bMORTGAGE\b", r"\bMTG\b"],
+            "MORTGAGE": [
+                r"\bMORTGAGE\b", 
+                r"\bMTG\b",
+                r"^MTGE$" # Added from mapping
+            ],
             "DEED_OF_TRUST": [
                 r"\bDEED\s+OF\s+TRUST\b", 
                 r"\bDOT\b", 
                 r"\bTRUST\s+DEED\b",
-                r"^(?:DT|D\s*T|D/T)$"
+                r"^(?:DT|D\s*T|D/T)$",
+                r"^D\s+OF\s+T$",
+                r"^D-TR$" # Added from mapping
             ],
             "RELEASE": [
                 r"\bRELEASE\b", 
@@ -83,7 +92,11 @@ class DocTypeClassifier:
                 r"\bRECONVEYANCE\b", 
                 r"\bDISCHARGE\b",
                 r"^(?:SAT)$",
-                r"\bSAT\b"
+                r"\bSAT\b",
+                r"^REL\s+D$",
+                r"^D-REL$", # Added from mapping
+                r"^C-SAT$", # Added from mapping
+                r"^N-SAT$"  # Added from mapping
             ],
             "LIEN": [r"\bLIEN\b", r"\bUCC\b", r"\bMECHANIC\b"],
             "PLAT": [
@@ -92,7 +105,15 @@ class DocTypeClassifier:
                 r"^(?:MAP|MAP/R)$",
                 r"\bMAP\b"
             ],
-            "EASEMENT": [r"\bEASEMENT\b", r"\bRIGHT\s+OF\s+WAY\b", r"\bROW\b", r"(?:^|\s)R/W(?:\s|$)"],
+            "EASEMENT": [
+                r"\bEASEMENT\b", 
+                r"\bRIGHT\s+OF\s+WAY\b", 
+                r"\bROW\b", 
+                r"(?:^|\s)R/W(?:\s|$)",
+                r"^ESMT$",
+                r"^EASE$", # Added from mapping
+                r"^R-WAY$"  # Added from mapping
+            ],
             "LEASE": [r"\bLEASE\b"]
         }
         
@@ -108,7 +129,7 @@ class DocTypeClassifier:
             "completion_tokens": 0,
             "calls": 0
         }
-        # GPT-4o-mini pricing as of Jan 2026 (approximate)
+        # GPT-4o-mini pricing as of Jan 2025 (approximate)
         self.PRICE_PER_1M_PROMPT = 0.15
         self.PRICE_PER_1M_COMPLETION = 0.60
 
@@ -143,11 +164,6 @@ class DocTypeClassifier:
         logger.info(f"Found {len(counts)} unique doc_types across {total_records} records.")
         return dict(counts), total_records
 
-    def normalize(self, text: str) -> str:
-        if not text:
-            return ""
-        return text.strip().upper()
-
     def pass1_rules(self, unique_doc_types: List[str]) -> Tuple[Dict[str, str], List[str]]:
         """Step 1: High-precision regex rules with ambiguity detection."""
         logger.info("Running Pass 1: Regex Rules...")
@@ -162,10 +178,8 @@ class DocTypeClassifier:
                 
             matches = []
             for category, patterns in self.compiled_rules.items():
-                for pattern in patterns:
-                    if pattern.search(norm):
-                        matches.append(category)
-                        break # Move to next category
+                if any(pattern.search(norm) for pattern in patterns):
+                    matches.append(category)
             
             unique_matches = list(set(matches))
             
@@ -236,8 +250,8 @@ class DocTypeClassifier:
                 break
         return []
 
-    def pass2_llm(self, unresolved: List[str], accepted_certainty: List[str], use_prototypes: bool = False, batch_size: int = 100) -> Tuple[Dict[str, str], List[str]]:
-        """Step 2: LLM classification (Pass 2a or 2b). Optimized batch size."""
+    def pass2_llm(self, unresolved: List[str], accepted_certainty: List[str], use_prototypes: bool = False, batch_size: int = 40) -> Tuple[Dict[str, str], List[str]]:
+        """Step 2: LLM classification (Pass 2a or 2b). Optimized batch size for accuracy."""
         label = "Pass 2b (Prototypes)" if use_prototypes else "Pass 2a (Batch)"
         logger.info(f"Running {label}...")
         resolved = {}
@@ -265,7 +279,8 @@ class DocTypeClassifier:
                 if not res:
                     res = normalized_batch_results.get(normalize_doc_type(raw_type))
                 
-                if res and res.get("category") in CATEGORIES and res.get("certainty") in accepted_certainty:
+                valid_categories = CATEGORIES + [FALLBACK_CATEGORY]
+                if res and res.get("category") in valid_categories and res.get("certainty") in accepted_certainty:
                     resolved[raw_type] = res["category"]
                 else:
                     still_unresolved.append(raw_type)
@@ -287,18 +302,54 @@ class DocTypeClassifier:
             key=lambda x: x["count"],
             reverse=True
         )
-        top_30 = top_unresolved[:30]
+        top_15 = top_unresolved[:15]
 
         # Step 2: LLM Passes
         resolved_p2a = {}
         resolved_p2b = {}
         
         if self.client:
-            # Step 2a
-            resolved_p2a, unresolved_p2a = self.pass2_llm(unresolved_p1, [CERTAINTY_A], use_prototypes=False)
+            # Pareto-based strategic sampling: cover 95% of unresolved records
+            unresolved_with_counts = sorted(
+                [(ut, counts.get(ut, 0)) for ut in unresolved_p1],
+                key=lambda x: x[1],
+                reverse=True
+            )
             
-            # Step 2b
-            resolved_p2b, unresolved_p2b = self.pass2_llm(unresolved_p2a, CERTAINTY_B, use_prototypes=True)
+            total_unresolved_records = sum(c for _, c in unresolved_with_counts)
+            
+            if total_unresolved_records == 0:
+                logger.info("No unresolved records remain after Pass 1. Skipping LLM passes.")
+                strategic_sample = []
+                low_freq_remainder = []
+            else:
+                cumulative = 0
+                strategic_sample = []
+                
+                for ut, count in unresolved_with_counts:
+                    strategic_sample.append(ut)
+                    cumulative += count
+                    if cumulative >= PARETO_THRESHOLD * total_unresolved_records:
+                        break
+                
+                low_freq_remainder = [ut for ut, _ in unresolved_with_counts if ut not in strategic_sample]
+            
+            if low_freq_remainder:
+                skipped_records = sum(counts.get(ut, 0) for ut in low_freq_remainder)
+                logger.info(f"Strategic sampling: skipping {len(low_freq_remainder)} low-frequency types, "
+                            f"representing {skipped_records} records ({skipped_records/total_records:.1%} of dataset).")
+
+            if strategic_sample:
+                # Step 2a
+                resolved_p2a, unresolved_p2a = self.pass2_llm(strategic_sample, [CERTAINTY_A], use_prototypes=False)
+                
+                # Step 2b
+                resolved_p2b, unresolved_p2b = self.pass2_llm(unresolved_p2a, CERTAINTY_B, use_prototypes=True)
+                
+                # Log unclassified strategic items
+                unclassified_strategic = [rt for rt in strategic_sample if rt not in resolved_p2a and rt not in resolved_p2b]
+                if unclassified_strategic:
+                    logger.info(f"{len(unclassified_strategic)} strategic sample types remained unclassified after LLM passes.")
         else:
             logger.info("Skipping LLM passes; missing or placeholder API key.")
         
@@ -320,7 +371,7 @@ class DocTypeClassifier:
         logger.info(f"Mapping saved to {MAPPING_OUTPUT_PATH}")
         
         # Calculate Metrics
-        self.generate_report(counts, total_records, resolved_p1, resolved_p2a, resolved_p2b, final_mapping, top_30[:15])
+        self.generate_report(counts, total_records, resolved_p1, resolved_p2a, resolved_p2b, final_mapping, top_15)
 
     def generate_report(self, counts, total_records, p1, p2a, p2b, final, top_unresolved):
         unique_count = len(counts)
@@ -339,8 +390,8 @@ class DocTypeClassifier:
         misc_weighted = sum(counts[rt] for rt, cat in final.items() if cat == "MISC")
         
         # Cost Calculation
-        cost = (self.usage["prompt_tokens"] / 1_000_000 * self.PRICE_PER_1M_PROMPT) + \
-               (self.usage["completion_tokens"] / 1_000_000 * self.PRICE_PER_1M_COMPLETION)
+        cost = (self.usage["prompt_tokens"] / TOKENS_PER_MILLION * self.PRICE_PER_1M_PROMPT) + \
+               (self.usage["completion_tokens"] / TOKENS_PER_MILLION * self.PRICE_PER_1M_COMPLETION)
 
         # Format top unresolved for README
         top_unresolved_md = "\n".join([f"- `{item['doc_type']}` ({item['count']} records)" for item in top_unresolved])
@@ -353,8 +404,14 @@ class DocTypeClassifier:
 
 #### 📋 Task 3: Methodology & Report
 
+## Sampling Strategy
+We process unique `doc_type` values using a Pareto-based strategic sampling approach:
+- **Pass 1 (Deterministic)**: All {unique_count} unique types are checked against high-precision rules.
+- **Strategic Filter (Pareto)**: Only unresolved types needed to cover {PARETO_THRESHOLD:.0%} of the remaining record volume are sent to the LLM.
+- **Long-tail Handling**: Rare types contributing to the bottom {1-PARETO_THRESHOLD:.0%} of volume are mapped directly to `{FALLBACK_CATEGORY}` to optimize cost and focus on high-impact records.
+
 ## Coverage Metrics (Unique Doc Types — unweighted)
-*These percentages are out of the {unique_count} unique doc_type strings found in the dataset. Many rare/long-tail types may remain MISC.*
+*These percentages are out of the {unique_count} unique doc_type strings found in the dataset. Many rare/long-tail types may remain {FALLBACK_CATEGORY}.*
 - **Non-MISC types**: {unique_count - misc_count} / {unique_count} ({ (unique_count - misc_count)/unique_count:.1%})
 - **MISC types**: {misc_count} / {unique_count} ({misc_count/unique_count:.1%})
 - Breakdown by pass:
@@ -363,11 +420,11 @@ class DocTypeClassifier:
     - Resolved by Pass 2b (LLM+Proto): {p2b_count} ({p2b_count/unique_count:.1%})
 
 ## Coverage Metrics (All Records — frequency-weighted by occurrence)
-*These percentages are out of the {total_records:,} total records. A small set of very common doc_type values can cover most records even if many rare types are MISC.*
+*These percentages are out of the {total_records:,} total records. A small set of very common doc_type values can cover most records even if many rare types are {FALLBACK_CATEGORY}.*
 - **Non-MISC records**: {total_records - misc_weighted} / {total_records} ({(p1_weighted + p2a_weighted + p2b_weighted)/total_records:.1%})
 - **MISC records**: {misc_weighted} / {total_records} ({misc_weighted/total_records:.1%})
 
-> **Note on Metrics**: It’s normal for MISC to be high by unique types but low by records because MISC often contains many low-frequency (long-tail) values that have minimal impact on overall dataset coverage.
+> **Note on Metrics**: It’s normal for {FALLBACK_CATEGORY} to be high by unique types but low by records because {FALLBACK_CATEGORY} often contains many low-frequency (long-tail) values that have minimal impact on overall dataset coverage.
 
 ## LLM Usage & Estimated Cost
 - Total LLM Calls: {self.usage['calls']}
@@ -382,7 +439,7 @@ class DocTypeClassifier:
 1. **Pass 1 (High-Precision Rules)**: Regex-based matching. Ambiguous matches (multiple categories) are deferred.
 2. **Pass 2a (LLM Batch)**: GPT-4o-mini classification accepting only certainty='{CERTAINTY_A}'.
 3. **Pass 2b (LLM Calibration)**: GPT-4o-mini with canonical prototypes accepting certainty in {CERTAINTY_B}.
-4. **Fallback**: Anything below thresholds or invalid is mapped to MISC.
+4. **Fallback**: Anything below thresholds, invalid, or filtered by strategic sampling is mapped to {FALLBACK_CATEGORY}.
 """
         # Stable README update using helper from utils.py
         update_readme_report_block(
