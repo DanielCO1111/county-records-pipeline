@@ -329,16 +329,21 @@ class DocTypeClassifier:
 
 #### 📋 Task 3: Methodology & Report
 
-## Coverage Metrics (Unique Types)
-- Total Unique Doc Types: {unique_count}
-- Resolved by Pass 1 (Rules): {p1_count} ({p1_count/unique_count:.1%})
-- Resolved by Pass 2a (LLM): {p2a_count} ({p2a_count/unique_count:.1%})
-- Resolved by Pass 2b (LLM+Proto): {p2b_count} ({p2b_count/unique_count:.1%})
-- Finalized as MISC: {misc_count} ({misc_count/unique_count:.1%})
+## Coverage Metrics (Unique Doc Types — unweighted)
+*These percentages are out of the {unique_count} unique doc_type strings found in the dataset. Many rare/long-tail types may remain MISC.*
+- **Non-MISC types**: {unique_count - misc_count} / {unique_count} ({ (unique_count - misc_count)/unique_count:.1%})
+- **MISC types**: {misc_count} / {unique_count} ({misc_count/unique_count:.1%})
+- Breakdown by pass:
+    - Resolved by Pass 1 (Rules): {p1_count} ({p1_count/unique_count:.1%})
+    - Resolved by Pass 2a (LLM): {p2a_count} ({p2a_count/unique_count:.1%})
+    - Resolved by Pass 2b (LLM+Proto): {p2b_count} ({p2b_count/unique_count:.1%})
 
-## Coverage Metrics (Total Records - {total_records})
-- Non-MISC Coverage: {(p1_weighted + p2a_weighted + p2b_weighted)/total_records:.1%}
-- MISC Coverage: {misc_weighted/total_records:.1%}
+## Coverage Metrics (All Records — frequency-weighted by occurrence)
+*These percentages are out of the {total_records:,} total records. A small set of very common doc_type values can cover most records even if many rare types are MISC.*
+- **Non-MISC records**: {total_records - misc_weighted} / {total_records} ({(p1_weighted + p2a_weighted + p2b_weighted)/total_records:.1%})
+- **MISC records**: {misc_weighted} / {total_records} ({misc_weighted/total_records:.1%})
+
+> **Note on Metrics**: It’s normal for MISC to be high by unique types but low by records because MISC often contains many low-frequency (long-tail) values that have minimal impact on overall dataset coverage.
 
 ## LLM Usage & Estimated Cost
 - Total LLM Calls: {self.usage['calls']}
