@@ -1,10 +1,7 @@
 # 📊 Dono Data Engineer Assessment
-
-> **Solution repository for the Dono Data Engineering take-home assignment**
-
 ---
 
-## 📋 Tasks Overview
+## 📋 Project Overview & Structure
 
 ### ✅ Task 1: County Pattern Analysis (COMPLETE)
 **Script:** `src/pattern_analyzer.py`  
@@ -16,18 +13,23 @@
 **Output:** `outputs/seminole_test_results.json`  
 **Objective:** Scrape Seminole County FL official records and convert to NC schema format for system compatibility.
 
----
+### ✅ Task 3: Document Type Classification (COMPLETE)
+**Script:** `src/llm_classifier.py`  
+**Output:** `outputs/doc_type_mapping.json`  
+**Objective:** Standardize messy `doc_type` values into 9 canonical categories using a multi-pass pipeline (Regex + LLM).
 
-## 📁 Project Structure
 
 ```
 assessment_solution/
 ├── src/
 │   ├── pattern_analyzer.py       # Task 1: County pattern analysis
-│   └── seminole_scraper.py       # Task 2: FL county scraper (includes --run-tests)
+│   ├── seminole_scraper.py       # Task 2: FL county scraper (includes --run-tests)
+│   ├── llm_classifier.py         # Task 3: LLM-based doc_type classification
+│   └── utils.py                  # Shared helper functions (Env, Path, README markers)
 ├── outputs/
 │   ├── county_patterns.json      # Task 1: Analysis results
-│   └── seminole_test_results.json # Task 2: Scraped FL records (ONLY output file)
+│   ├── seminole_test_results.json # Task 2: Scraped FL records
+│   └── doc_type_mapping.json     # Task 3: Standardized mapping mapping
 ├── requirements.txt               # Python dependencies
 ├── pyproject.toml                # Code formatting/linting configuration
 └── README.md                     # This file
@@ -35,26 +37,14 @@ assessment_solution/
 ../  (parent directory)
 ├── nc_records_assessment.jsonl  # Input: JSONL data (~14K records, ~2-3 MB)
 └── records/                     # Input: PDF files by county (optional for Task 1)
-    ├── alamance/
-    ├── buncombe/
-    ├── cabarrus/
-    ├── cumberland/
-    ├── davidson/
-    ├── durham/
-    ├── forsyth/
-    ├── guilford/
-    ├── johnston/
-    ├── mecklenburg/
-    ├── onslow/
-    ├── union/
-    └── wake/
+
 ```
 
-> **Note:** Input data files are stored one directory above and are **not committed to git** due to size.
+> **Note:** Input data files are stored one directory above and are **not committed to git or sent on mail** due to size.
 
 ---
 
-## 🎯 Requirements
+## 🎯 Requirements & Setup Instructions
 
 ### Python Version
 - **Minimum:** Python 3.9
@@ -66,7 +56,7 @@ assessment_solution/
 All Python dependencies are listed in `requirements.txt`:
 
 ```txt
-# Task 2 (Seminole Scraper) - REQUIRED
+# Task 2 (Seminole Scraper) 
 selenium          # Browser automation for dynamic websites
 webdriver-manager # Automatic ChromeDriver management
 pytz              # Timezone handling for ET/EST conversions
@@ -80,56 +70,52 @@ beautifulsoup4    # HTML parsing (dev exploration only)
 lxml              # XML processing (dev exploration only)
 black             # Code formatter (dev)
 ruff              # Python linter (dev)
+
+#Task 3 (LLM-Assisted Document Classification) - Bonus Task
+openai            #(API client)
+python-dotenv     #(For managing the API key)
 ```
 
 **Note:** 
-- Task 1 (`pattern_analyzer.py`) uses only Python standard library
-- Task 2 (`seminole_scraper.py`) requires only: `selenium`, `webdriver-manager`, `pytz`, `python-dateutil`
-- Other packages are optional/dev-only and not used by the submission scripts
+- Task 1 (`pattern_analyzer.py`) uses only the Python standard library.
+- Task 2 (`seminole_scraper.py`) requires: `selenium`, `webdriver-manager`, `pytz`, `python-dateutil`.
+- Task 3 (`llm_classifier.py`) requires: `openai`, `python-dotenv`.
+- Other packages listed in `requirements.txt` are for development (formatting/linting) or optional data exploration.
 
 ### Data Requirements
 
 **Input files must be located in parent directory:**
 - `../nc_records_assessment.jsonl` (13,886 records, ~2-3 MB)
-- `../records/` (PDF files by county - optional for pattern analysis)
 
 **Output directory:**
 - `assessment_solution/outputs/` (created automatically if missing)
 
 ---
 
-## 🚀 Setup Instructions
-
 ### 1️⃣ Create Virtual Environment
 
 **Windows (CMD):**
-```bash
 python -m venv .venv
 .\.venv\Scripts\activate
-```
 
 **Windows (PowerShell):**
-```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
 
 **Linux/macOS:**
-```bash
 python -m venv .venv
 source .venv/bin/activate
-```
 
 ### 2️⃣ Install Dependencies
-
-```bash
 python -m pip install -U pip
 python -m pip install -r requirements.txt
-```
 
----
+### 3️⃣ Configure Environment (Task 3 Only)
+Task 3 requires an OpenAI API key. Create a `.env` file in the `assessment_solution/` directory and add your key:
+OPENAI_API_KEY=sk-your-key-here---
 
-## 🎨 Code Style
+
+### 🎨 Code Style
 
 This project follows **PEP-8** conventions enforced by:
 
@@ -137,25 +123,18 @@ This project follows **PEP-8** conventions enforced by:
 - **Ruff:** Fast Python linter
 
 ### Check Code Style
-```bash
 ruff check .
-black --check .
-```
+black --check .### Auto-Format Code
+black .**Configuration:** See `pyproject.toml` for formatting rules (100 char line length, Python 3.9 target).
 
-### Auto-Format Code
-```bash
-black .
-```
 
 **Configuration:** See `pyproject.toml` for formatting rules (100 char line length, Python 3.9 target).
 
 ---
 
-## 💻 Usage
 
-### Task 1: County Pattern Analysis
 
-**Objective:** Extract and document patterns in instrument numbers, book/page numbers, date ranges, and document types for each county.
+## Task 1: County Pattern Analysis
 
 **Run the script:**
 
@@ -173,11 +152,10 @@ python src/pattern_analyzer.py
 - Generates document type distribution (top 10) and category mappings
 - Processes 13,886 records in 5-10 seconds
 
----
 
-## 📝 Task 1: Input Data Format
+### 📝 Task 1: Input Data Format
 
-### `nc_records_assessment.jsonl`
+#### `nc_records_assessment.jsonl`
 - **Format:** JSONL (one JSON record per line)
 - **Records:** 13,886 entries
 - **Location:** Parent directory (`../nc_records_assessment.jsonl`)
@@ -186,18 +164,18 @@ python src/pattern_analyzer.py
   - `book`, `page`, `doc_type`, `doc_category`
   - `grantors`, `grantees`, `date`, `consideration`
 
-### `records/` Directory
+#### `records/` Directory
 - **Format:** PDF files (not used in Task 1)
 - **Organization:** `county/instrument_number.pdf`
 - **Counties:** 13 total (alamance, buncombe, cabarrus, cumberland, davidson, durham, forsyth, guilford, johnston, mecklenburg, onslow, union, wake)
 
 ---
 
-## 📋 Key Assumptions & Design Decisions
+### 📋 Key Assumptions & Design Decisions
 
 > **Critical for Testers:** These assumptions were made based on requirements analysis and data inspection.
 
-### ⚠️ Critical Assumptions
+#### ⚠️ Critical Assumptions
 
 **1. Earliest Valid Transaction Year: 1900**
 - The analysis operates on the assumption that the **earliest valid transaction year is 1900**
@@ -219,7 +197,6 @@ python src/pattern_analyzer.py
 - Date nulls are additionally tracked under the `null_date` anomaly type with example records
 - **Rationale:** Ensures data quality issues are visible and quantifiable in the analysis output
 
----
 
 ### 1. Pattern Classification Strategy
 
@@ -315,37 +292,6 @@ Instrument numbers are classified using strict precedence order:
 - Logs first 10 failed line numbers with content preview
 - **Rationale:** Robust handling of messy real-world data
 
----
-
-## 🚀 Quick Start
-
-```bash
-# 1. Setup (one-time)
-cd assessment_solution
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1          # Windows PowerShell
-# OR
-source .venv/bin/activate             # Linux/macOS
-
-python -m pip install -U pip
-python -m pip install -r requirements.txt
-
-# 2. Run Task 1 - Pattern Analyzer
-python src/pattern_analyzer.py
-# Output: outputs/county_patterns.json
-
-# 3. Run Task 2 - Seminole Scraper (single search)
-python src/seminole_scraper.py --name "SMITH JOHN"
-# Output: outputs/seminole_test_results.json
-
-# 4. Run Task 2 - Full test suite (3 predefined test cases)
-python src/seminole_scraper.py --run-tests
-# Output: outputs/seminole_test_results.json (contains all 3 tests + validations)
-```
-
-**Expected:** 
-- Task 1: Processes 13,886 records in 5-10 seconds
-- Task 2: Test suite completes in ~2-3 minutes (97 total records across 3 tests)
 
 ---
 
@@ -521,6 +467,29 @@ This scraper follows a **schema-first, conservative approach**:
 ### Test Results Summary
 
 **Test Cases (run via `--run-tests`):**
+
+All screenshots were taken from the actual logs collected during testing:
+
+<img width="668" height="67" alt="Screenshot 2026-01-28 202823" src="https://github.com/user-attachments/assets/6b4091d6-83ab-417d-8a3b-49fde22fa809" />
+
+<img width="1034" height="164" alt="Screenshot 2026-01-28 203043" src="https://github.com/user-attachments/assets/f20ab2e1-53fd-4e4d-97b1-5cfcecc045d3" />
+
+<img width="1028" height="168" alt="Screenshot 2026-01-28 203601" src="https://github.com/user-attachments/assets/0206ac4c-1c5c-43f0-b339-4e78b5509e6a" />
+
+<img width="1100" height="94" alt="Screenshot 2026-01-28 203758" src="https://github.com/user-attachments/assets/5fb97de6-e053-4ef7-b69c-0c62e4e1e70f" />
+
+<img width="1031" height="98" alt="Screenshot 2026-01-28 204008" src="https://github.com/user-attachments/assets/2220933a-95ce-4084-b461-9c21efb4174e" />
+
+<img width="1080" height="92" alt="Screenshot 2026-01-28 204138" src="https://github.com/user-attachments/assets/2a958fc6-1502-462b-b743-5c38a083c6c9" />
+
+<img width="1075" height="122" alt="Screenshot 2026-01-28 204253" src="https://github.com/user-attachments/assets/02c73793-2e87-4cb6-b998-0851570e10ea" />
+
+<img width="655" height="54" alt="Screenshot 2026-01-28 204353" src="https://github.com/user-attachments/assets/59642eba-a923-4bf6-b47d-7f15b0e82c10" />
+
+
+
+
+
 
 | # | Test Name | Expected | Actual | Pages | Status |
 |---|-----------|----------|--------|-------|--------|
@@ -771,15 +740,10 @@ RPM(N) = 60N / (t₀ + αN)
 
 ---
 
-**Last Updated:** January 2026  
-**Status:** Tasks 1 & 2 complete
+## 🎩 Task 3: LLM-Assisted Document Classification
 
 <!-- REPORT_START -->
 
-### ✅ Task 3: Document Type Classification (COMPLETE)
-**Script:** `src/llm_classifier.py`  
-**Output:** `outputs/doc_type_mapping.json`  
-**Objective:** Standardize messy `doc_type` values into 9 canonical categories using a multi-pass pipeline (Regex + LLM).
 
 #### 📋 Task 3: Methodology & Report
 
