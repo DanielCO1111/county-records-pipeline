@@ -1,5 +1,12 @@
 # 📊 Dono Data Engineer Assessment
+
+*Daniel Cohen*
+
+*Email: dcohen111153@gmail.com*
+
+*Phone: +972-547627314*
 ---
+
 
 ## 📋 Project Overview & Structure
 
@@ -45,6 +52,18 @@ assessment_solution/
 ---
 
 ## 🎯 Requirements & Setup Instructions
+
+### 📋 Limitations & Notes for Evaluator
+- **Browser Requirement:** Task 2 (Scraper) requires **Google Chrome** installed. It uses `webdriver-manager` to handle driver binaries automatically.
+- **Task 3 API Key:** Requires a valid `OPENAI_API_KEY` in a `.env` file. It uses `gpt-4o-mini` for cost-efficiency.
+- **Data Location:** Input data (`nc_records_assessment.jsonl` and `records/`) must be in the **parent directory** (`../`) relative to the `assessment_solution` folder.
+- **Determinism:** Task 1 and 2 are deterministic. Task 3 uses `temperature=0` to ensure reproducible LLM classifications.
+
+### 📂 Output Files
+All scripts automatically generate their results in the `outputs/` directory:
+1.  **Task 1:** `outputs/county_patterns.json`
+2.  **Task 2:** `outputs/seminole_test_results.json`
+3.  **Task 3:** `outputs/doc_type_mapping.json`
 
 ### Python Version
 - **Minimum:** Python 3.9
@@ -149,10 +168,11 @@ python src/pattern_analyzer.py
 
 All required analyses for Task 1 are programmatically extracted and stored in `outputs/county_patterns.json`. The file is structured by county, with each entry containing:
 
-- **Instrument Regex Patterns:** Found under `patterns[]`. Each entry includes a `regex`, `description`, and `count`.
-- **Anomalies:** Found under `anomalies`. Tracks `future_date`, `very_old_date` (<1900), `null_date`, and `unparseable_date` with example instrument numbers.
-- **Book/Page Formats & Ranges:** Found under `patterns[]`. Includes `book_range` and `page_range` (min/max) for each specific format family.
-- **Date Ranges:** Found under `date_range` (earliest/latest valid dates).
+- **Instrument Number Patterns:** Found under `instrument_patterns[]`. Each entry includes a `regex`, `description`, `example`, and `count`.
+- **Book Patterns:** Found under `book_patterns[]`. Includes `regex`, `range` (min/max), and `null_count`.
+- **Page Patterns:** Found under `page_patterns[]`. Includes `regex`, `range` (min/max), and `null_count`.
+- **Date Ranges:** Found under `date_range`. Includes `earliest` and `latest` valid dates.
+- **Anomalies:** Found under `date_range["anomalies"]`. Tracks `future_date`, `very_old_date` (<1900), `null_date`, and `unparseable_date`.
 - **Document Types:** Found under `top_doc_types` (Top 10 distribution) and `unique_doc_type_count`.
 - **Doc Type/Category Relation:** Found under `doc_type_categories`. Maps each unique `doc_type` found in that county to its corresponding `doc_category`.
 
@@ -477,30 +497,12 @@ This scraper follows a **schema-first, conservative approach**:
 
 ### Test Results Summary
 
-**Test Cases (run via `--run-tests`):**
+**Run the test suite:**
+```bash
+python src/seminole_scraper.py --run-tests
+```
 
-All screenshots were taken from the actual logs collected during testing:
-
-<img width="668" height="67" alt="Screenshot 2026-01-28 202823" src="https://github.com/user-attachments/assets/6b4091d6-83ab-417d-8a3b-49fde22fa809" />
-
-<img width="1034" height="164" alt="Screenshot 2026-01-28 203043" src="https://github.com/user-attachments/assets/f20ab2e1-53fd-4e4d-97b1-5cfcecc045d3" />
-
-<img width="1028" height="168" alt="Screenshot 2026-01-28 203601" src="https://github.com/user-attachments/assets/0206ac4c-1c5c-43f0-b339-4e78b5509e6a" />
-
-<img width="1100" height="94" alt="Screenshot 2026-01-28 203758" src="https://github.com/user-attachments/assets/5fb97de6-e053-4ef7-b69c-0c62e4e1e70f" />
-
-<img width="1031" height="98" alt="Screenshot 2026-01-28 204008" src="https://github.com/user-attachments/assets/2220933a-95ce-4084-b461-9c21efb4174e" />
-
-<img width="1080" height="92" alt="Screenshot 2026-01-28 204138" src="https://github.com/user-attachments/assets/2a958fc6-1502-462b-b743-5c38a083c6c9" />
-
-<img width="1075" height="122" alt="Screenshot 2026-01-28 204253" src="https://github.com/user-attachments/assets/02c73793-2e87-4cb6-b998-0851570e10ea" />
-
-<img width="655" height="54" alt="Screenshot 2026-01-28 204353" src="https://github.com/user-attachments/assets/59642eba-a923-4bf6-b47d-7f15b0e82c10" />
-
-
-
-
-
+**Output:** `outputs/seminole_test_results.json` (A wrapper object containing `generated_at`, `tests[]`, and a `summary` of pass/fail counts).
 
 | # | Test Name | Expected | Actual | Pages | Status |
 |---|-----------|----------|--------|-------|--------|
@@ -509,20 +511,13 @@ All screenshots were taken from the actual logs collected during testing:
 | 3 | XYZ ABC | 0 | 0 | 0 | ✅ PASS |
 
 **Validations performed per test:**
-- Count match (actual == expected)
-- Schema keys (exact 14 NC-schema fields)
-- Null rules (parcel_number, doc_category, book_type, consideration must be null)
-- Uppercase names (grantors/grantees)
-- Date format (ISO 8601 with timezone offset)
-- No URLs in data (document links not retrieved)
+- **Count match:** `actual == expected`
+- **Schema keys:** Exact 14 NC-schema fields (no extra columns from FL grid are stored).
+- **Null rules:** `parcel_number`, `doc_category`, `book_type`, `consideration` are always `null`.
+- **Uppercase names:** `grantors`/`grantees` normalized to uppercase.
+- **Date format:** ISO 8601 with timezone offset (e.g., `-05:00`).
 
 Execution progress is visible via stdout logs (no additional output files).
-
-**Run the test suite:**
-```bash
-python src/seminole_scraper.py --run-tests
-# Output: outputs/seminole_test_results.json (contains all 3 tests with validations)
-```
 
 ### Usage
 
@@ -542,7 +537,7 @@ python src/seminole_scraper.py --name "SMITH JOHN" --headless
 python src/seminole_scraper.py --run-tests --headless
 ```
 
-> **Note:** The `--output` argument exists for backwards compatibility but is **ignored**. Output is always written to `outputs/seminole_test_results.json`.
+> **Note:** The `--output` argument is supported for CLI compatibility but defaults to the required `outputs/seminole_test_results.json`.
 
 #### Python API
 
@@ -770,9 +765,10 @@ To minimize costs while maintaining high accuracy, the classifier uses a **Paret
 - **95% Coverage Target:** The LLM only processes the most frequent unresolved types required to reach **95% record coverage**.
 - **Efficiency:** This avoids wasting API tokens on "long-tail" unique types that only appear once or twice, which are safely defaulted to `MISC`.
 
-#### 2. LLM Prompt (Verbatim)
-The following system prompt is used for classification (GPT-4o-mini):
+#### 2. LLM Prompt Strategy (Dynamic)
+The pipeline uses a base system prompt that is dynamically enhanced with prototypical examples during the final pass to improve accuracy for ambiguous abbreviations.
 
+**Base System Prompt:**
 ```text
 You are a legal document classifier. Classify the following document types into exactly one of these categories: SALE_DEED, MORTGAGE, DEED_OF_TRUST, RELEASE, LIEN, PLAT, EASEMENT, LEASE, or 'MISC'. Return a JSON object with a 'results' key containing a list of objects: [{"doc_type": "...", "category": "...", "certainty": "HIGH/MEDIUM/LOW", "reason": "..."}]. 
 
@@ -787,6 +783,19 @@ CRITICAL CONSTRAINTS:
 3. certainty MUST be: 'HIGH', 'MEDIUM', or 'LOW'.
 4. reason MUST be short (3-7 words).
 5. Output JSON object only.
+```
+
+**Pass 2b Enhancement (Appended to Base):**
+When processing difficult or ambiguous types in Pass 2b, the following prototypical examples are appended to the prompt to provide reference anchors:
+```text
+SALE_DEED: deed, warranty deed, quitclaim, grant deed, conveyance
+MORTGAGE: mortgage, mtg
+DEED_OF_TRUST: deed of trust, dot, trust deed
+RELEASE: release, satisfaction, reconveyance, discharge
+LIEN: lien, claim of lien, mechanics lien, ucc
+PLAT: plat, map, survey
+EASEMENT: easement, right of way, row, r/w
+LEASE: lease, memorandum of lease
 ```
 
 #### 3. Multi-Pass Validation Method
