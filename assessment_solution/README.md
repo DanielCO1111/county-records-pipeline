@@ -37,7 +37,7 @@ assessment_solution/
 ├── outputs/
 │   ├── county_patterns.json      # Task 1: Analysis results
 │   ├── seminole_test_results.json # Task 2: Scraped FL records
-│   └── doc_type_mapping.json     # Task 3: Standardized mapping mapping
+│   └── doc_type_mapping.json     # Task 3: Standardized mapping 
 ├── requirements.txt               # Python dependencies
 ├── pyproject.toml                # Code formatting/linting configuration
 └── README.md                     # This file
@@ -115,24 +115,39 @@ python-dotenv     #(For managing the API key)
 ### 1️⃣ Create Virtual Environment
 
 **Windows (CMD):**
+
+```
 python -m venv .venv
 .\.venv\Scripts\activate
+```
 
 **Windows (PowerShell):**
+
+```
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+```
 
 **Linux/macOS:**
+
+```
 python -m venv .venv
 source .venv/bin/activate
+```
 
 ### 2️⃣ Install Dependencies
+
+```
 python -m pip install -U pip
 python -m pip install -r requirements.txt
+```
 
 ### 3️⃣ Configure Environment (Task 3 Only)
 Task 3 requires an OpenAI API key. Create a `.env` file in the `assessment_solution/` directory and add your key:
+
+```
 OPENAI_API_KEY=sk-your-key-here---
+```
 
 
 ### 🎨 Code Style
@@ -144,11 +159,14 @@ This project follows **PEP-8** conventions enforced by:
 
 ### Check Code Style
 ruff check .
-black --check .### Auto-Format Code
-black .**Configuration:** See `pyproject.toml` for formatting rules (100 char line length, Python 3.9 target).
+black --check .
 
+### Auto-Format Code
+black .
 
-**Configuration:** See `pyproject.toml` for formatting rules (100 char line length, Python 3.9 target).
+**Configuration:** 
+
+See `pyproject.toml` for formatting rules (100 char line length, Python 3.9 target).
 
 ---
 
@@ -165,24 +183,42 @@ python src/pattern_analyzer.py
 
 **Output:** `outputs/county_patterns.json`
 
+
 ### 📂 Where are the Task 1 Answers?
 
-All required analyses for Task 1 are programmatically extracted and stored in `outputs/county_patterns.json`. The file is structured by county, with each entry containing:
+All required analyses for Task 1 are programmatically extracted and stored in `outputs/county_patterns.json`.
+The file is structured by county (top-level keys), where each county entry contains:
 
-- **Instrument Number Patterns:** Found under `instrument_patterns[]`. Each entry includes a `regex`, `description`, `example`, and `count`.
-- **Book Patterns:** Found under `book_patterns[]`. Includes `regex`, `range` (min/max), and `null_count`.
-- **Page Patterns:** Found under `page_patterns[]`. Includes `regex`, `range` (min/max), and `null_count`.
-- **Date Ranges:** Found under `date_range`. Includes `earliest` and `latest` valid dates.
-- **Anomalies:** Found under `date_range["anomalies"]`. Tracks `future_date`, `very_old_date` (<1900), `null_date`, and `unparseable_date`.
-- **Document Types:** Found under `top_doc_types` (Top 10 distribution) and `unique_doc_type_count`.
-- **Doc Type/Category Relation:** Found under `doc_type_categories`. Maps each unique `doc_type` found in that county to its corresponding `doc_category`.
+- **Instrument Number Patterns:** `instrument_patterns[]`  
+  Each item includes: `pattern`, `regex`, `example`, `count`, `percentage`.
+
+- **Book Patterns:** `book_patterns[]`  
+  Each item includes: `pattern`, `regex`, `example`, `count`, `percentage`, `null_count`, and `range` (`min`/`max`).  
+  Additionally, total missing book values are reported as `book_null_count` at the county level.
+
+- **Page Patterns:** `page_patterns[]`  
+  Each item includes: `pattern`, `regex`, `example`, `count`, `percentage`, `null_count`, and `range` (`min`/`max`).  
+  Additionally, total missing page values are reported as `page_null_count` at the county level.
+
+- **Date Ranges:** `date_range`  
+  Includes `earliest` and `latest` valid dates (per county).
+
+- **Date Anomalies:** `anomalies`  
+  Tracks `future_date`, `very_old_date` (<1900), `null_date`, and `unparseable_date` (with counts/examples).
+
+- **Document Types:** `top_doc_types` (top 10 distribution) and `unique_doc_type_count`.
+
+- **Doc Type ↔ Category Relationship:** `doc_type_categories`  
+  Maps each unique `doc_type` to its observed `doc_category` values in that county.
+
+
+
 
 **What it does:**
 - Analyzes instrument number formats (regex patterns, counts, percentages)
 - Identifies book/page number patterns with ranges
 - Tracks date ranges and anomalies (future dates, very old dates, nulls)
 - Generates document type distribution (top 10) and category mappings
-- Processes 13,886 records in 5-10 seconds
 
 
 ### 📝 Task 1: Input Data Format
