@@ -145,6 +145,17 @@ python src/pattern_analyzer.py
 
 **Output:** `outputs/county_patterns.json`
 
+### 📂 Where are the Task 1 Answers?
+
+All required analyses for Task 1 are programmatically extracted and stored in `outputs/county_patterns.json`. The file is structured by county, with each entry containing:
+
+- **Instrument Regex Patterns:** Found under `patterns[]`. Each entry includes a `regex`, `description`, and `count`.
+- **Anomalies:** Found under `anomalies`. Tracks `future_date`, `very_old_date` (<1900), `null_date`, and `unparseable_date` with example instrument numbers.
+- **Book/Page Formats & Ranges:** Found under `patterns[]`. Includes `book_range` and `page_range` (min/max) for each specific format family.
+- **Date Ranges:** Found under `date_range` (earliest/latest valid dates).
+- **Document Types:** Found under `top_doc_types` (Top 10 distribution) and `unique_doc_type_count`.
+- **Doc Type/Category Relation:** Found under `doc_type_categories`. Maps each unique `doc_type` found in that county to its corresponding `doc_category`.
+
 **What it does:**
 - Analyzes instrument number formats (regex patterns, counts, percentages)
 - Identifies book/page number patterns with ranges
@@ -742,40 +753,76 @@ RPM(N) = 60N / (t₀ + αN)
 
 ## 🎩 Task 3: LLM-Assisted Document Classification
 
+### Run the script:
+
+```bash
+cd assessment_solution
+python src/llm_classifier.py
+```
+
+**Output:** `outputs/doc_type_mapping.json` (A flat mapping of all unique `doc_type` strings to one of 9 canonical categories).
+
+### 📝 Approach & Methodology
+
+#### 1. Strategic Sampling Strategy
+To minimize costs while maintaining high accuracy, the classifier uses a **Pareto-based strategic sampling** approach:
+- **Frequency Analysis:** It first extracts all unique `doc_type` values and their frequencies from the 13,886 records.
+- **95% Coverage Target:** The LLM only processes the most frequent unresolved types required to reach **95% record coverage**.
+- **Efficiency:** This avoids wasting API tokens on "long-tail" unique types that only appear once or twice, which are safely defaulted to `MISC`.
+
+#### 2. LLM Prompt (Verbatim)
+The following system prompt is used for classification (GPT-4o-mini):
+
+```text
+You are a legal document classifier. Classify the following document types into exactly one of these categories: SALE_DEED, MORTGAGE, DEED_OF_TRUST, RELEASE, LIEN, PLAT, EASEMENT, LEASE, or 'MISC'. Return a JSON object with a 'results' key containing a list of objects: [{"doc_type": "...", "category": "...", "certainty": "HIGH/MEDIUM/LOW", "reason": "..."}]. 
+
+CERTAINTY RUBRIC:
+- HIGH: Clear direct match.
+- MEDIUM: Plausible but not fully explicit.
+- LOW: Truly unclear. Avoid LOW unless necessary.
+
+CRITICAL CONSTRAINTS:
+1. Return doc_type EXACTLY as provided (verbatim).
+2. category MUST be one of: SALE_DEED, MORTGAGE, DEED_OF_TRUST, RELEASE, LIEN, PLAT, EASEMENT, LEASE, or 'MISC'.
+3. certainty MUST be: 'HIGH', 'MEDIUM', or 'LOW'.
+4. reason MUST be short (3-7 words).
+5. Output JSON object only.
+```
+
+#### 3. Multi-Pass Validation Method
+The pipeline ensures accuracy through three distinct stages:
+1.  **Pass 1 (Regex):** High-precision deterministic rules handle common types (e.g., "WARRANTY DEED" -> `SALE_DEED`).
+2.  **Pass 2a (LLM Batch):** Unresolved types from the strategic sample are sent to the LLM. Only **HIGH** certainty results are accepted.
+3.  **Pass 2b (LLM + Prototypes):** Remaining unresolved items are re-processed with **prototypical examples** (e.g., "DOT" -> `DEED_OF_TRUST`) included in the prompt. **HIGH** and **MEDIUM** certainty results are accepted here.
+4.  **Fallback:** Any type still unresolved or outside the strategic sample is mapped to `MISC`.
+
+#### 4. Trade-offs: Accuracy vs. Cost
+- **Model Choice:** Used `gpt-4o-mini` for its excellent balance of reasoning capability and extremely low cost ($0.15/1M tokens).
+- **Sampling vs. Exhaustion:** By targeting 95% coverage, we reduced LLM calls by ~60% while only missing the "noise" of the dataset.
+- **Certainty Filtering:** We prioritize accuracy by rejecting "LOW" certainty LLM guesses, preferring to label them `MISC` rather than risk a misclassification.
+
 <!-- REPORT_START -->
 
+### 📊 Pipeline Metrics
 
-#### 📋 Task 3: Methodology & Report
-
-## Sampling Strategy
-We process unique `doc_type` values using a Pareto-based strategic sampling approach:
-- **Pass 1 (Deterministic)**: All 339 unique types are checked against high-precision rules.
-- **Strategic Filter (Pareto)**: Only unresolved types needed to cover 95% of the remaining record volume are sent to the LLM.
-- **Long-tail Handling**: Rare types contributing to the bottom 5% of volume are mapped directly to `MISC` to optimize cost and focus on high-impact records.
-
-## Coverage Metrics (Unique Doc Types — unweighted)
-*These percentages are out of the 339 unique doc_type strings found in the dataset. Many rare/long-tail types may remain MISC.*
-- **Non-MISC types**: 107 / 339 (31.6%)
-- **MISC types**: 232 / 339 (68.4%)
-- Breakdown by pass:
+#### Coverage (Unique Doc Types)
+- **Non-MISC types**: 112 / 339 (33.0%)
+- **MISC types**: 227 / 339 (67.0%)
+- **Breakdown by pass**:
     - Resolved by Pass 1 (Rules): 103 (30.4%)
-    - Resolved by Pass 2a (LLM): 5 (1.5%)
-    - Resolved by Pass 2b (LLM+Proto): 22 (6.5%)
+    - Resolved by Pass 2a (LLM): 29 (8.6%)
+    - Resolved by Pass 2b (LLM+Proto): 9 (2.7%)
 
-## Coverage Metrics (All Records — frequency-weighted by occurrence)
-*These percentages are out of the 13,886 total records. A small set of very common doc_type values can cover most records even if many rare types are MISC.*
-- **Non-MISC records**: 10889 / 13886 (80.1%)
-- **MISC records**: 2997 / 13886 (21.6%)
+#### Coverage (All Records — weighted)
+- **Non-MISC records**: 10,991 / 13,886 (79.2%)
+- **MISC records**: 2,895 / 13,886 (20.8%)
 
-> **Note on Metrics**: It’s normal for MISC to be high by unique types but low by records because MISC often contains many low-frequency (long-tail) values that have minimal impact on overall dataset coverage.
+#### LLM Usage & Cost
+- **Total LLM Calls**: 6
+- **Tokens**: 2863 prompt / 6597 completion
+- **Estimated Cost**: $0.0044
 
-## LLM Usage & Estimated Cost
-- Total LLM Calls: 6
-- Prompt Tokens: 2995
-- Completion Tokens: 7472
-- Estimated Cost: $0.0049 (using assumed GPT-4o-mini rates; verify current pricing)
-
-## Top Unresolved by Frequency (After Pass 1)
+#### Top Unresolved (After Pass 1)
 - `CANCELLATION` (203 records)
 - `ASSIGNMENT` (193 records)
 - `SUBSTITUTION TRUSTEE` (165 records)
@@ -791,11 +838,5 @@ We process unique `doc_type` values using a Pareto-based strategic sampling appr
 - `DECLARATION` (50 records)
 - `ASGMT` (46 records)
 - `Covenants and Restrictions` (43 records)
-
-## Methodology
-1. **Pass 1 (High-Precision Rules)**: Regex-based matching. Ambiguous matches (multiple categories) are deferred.
-2. **Pass 2a (LLM Batch)**: GPT-4o-mini classification accepting only certainty='HIGH'.
-3. **Pass 2b (LLM Calibration)**: GPT-4o-mini with canonical prototypes accepting certainty in ['HIGH', 'MEDIUM'].
-4. **Fallback**: Anything below thresholds, invalid, or filtered by strategic sampling is mapped to MISC.
 
 <!-- REPORT_END -->

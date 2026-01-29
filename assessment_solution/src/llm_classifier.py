@@ -397,49 +397,27 @@ class DocTypeClassifier:
         top_unresolved_md = "\n".join([f"- `{item['doc_type']}` ({item['count']} records)" for item in top_unresolved])
 
         report_content = f"""
-### ✅ Task 3: Document Type Classification (COMPLETE)
-**Script:** `src/llm_classifier.py`  
-**Output:** `outputs/doc_type_mapping.json`  
-**Objective:** Standardize messy `doc_type` values into 9 canonical categories using a multi-pass pipeline (Regex + LLM).
+### 📊 Pipeline Metrics
 
-#### 📋 Task 3: Methodology & Report
-
-## Sampling Strategy
-We process unique `doc_type` values using a Pareto-based strategic sampling approach:
-- **Pass 1 (Deterministic)**: All {unique_count} unique types are checked against high-precision rules.
-- **Strategic Filter (Pareto)**: Only unresolved types needed to cover {PARETO_THRESHOLD:.0%} of the remaining record volume are sent to the LLM.
-- **Long-tail Handling**: Rare types contributing to the bottom {1-PARETO_THRESHOLD:.0%} of volume are mapped directly to `{FALLBACK_CATEGORY}` to optimize cost and focus on high-impact records.
-
-## Coverage Metrics (Unique Doc Types — unweighted)
-*These percentages are out of the {unique_count} unique doc_type strings found in the dataset. Many rare/long-tail types may remain {FALLBACK_CATEGORY}.*
+#### Coverage (Unique Doc Types)
 - **Non-MISC types**: {unique_count - misc_count} / {unique_count} ({ (unique_count - misc_count)/unique_count:.1%})
 - **MISC types**: {misc_count} / {unique_count} ({misc_count/unique_count:.1%})
-- Breakdown by pass:
+- **Breakdown by pass**:
     - Resolved by Pass 1 (Rules): {p1_count} ({p1_count/unique_count:.1%})
     - Resolved by Pass 2a (LLM): {p2a_count} ({p2a_count/unique_count:.1%})
     - Resolved by Pass 2b (LLM+Proto): {p2b_count} ({p2b_count/unique_count:.1%})
 
-## Coverage Metrics (All Records — frequency-weighted by occurrence)
-*These percentages are out of the {total_records:,} total records. A small set of very common doc_type values can cover most records even if many rare types are {FALLBACK_CATEGORY}.*
-- **Non-MISC records**: {total_records - misc_weighted} / {total_records} ({(p1_weighted + p2a_weighted + p2b_weighted)/total_records:.1%})
-- **MISC records**: {misc_weighted} / {total_records} ({misc_weighted/total_records:.1%})
+#### Coverage (All Records — weighted)
+- **Non-MISC records**: {total_records - misc_weighted:,} / {total_records:,} ({(total_records - misc_weighted)/total_records:.1%})
+- **MISC records**: {misc_weighted:,} / {total_records:,} ({misc_weighted/total_records:.1%})
 
-> **Note on Metrics**: It’s normal for {FALLBACK_CATEGORY} to be high by unique types but low by records because {FALLBACK_CATEGORY} often contains many low-frequency (long-tail) values that have minimal impact on overall dataset coverage.
+#### LLM Usage & Cost
+- **Total LLM Calls**: {self.usage['calls']}
+- **Tokens**: {self.usage['prompt_tokens']} prompt / {self.usage['completion_tokens']} completion
+- **Estimated Cost**: ${cost:.4f}
 
-## LLM Usage & Estimated Cost
-- Total LLM Calls: {self.usage['calls']}
-- Prompt Tokens: {self.usage['prompt_tokens']}
-- Completion Tokens: {self.usage['completion_tokens']}
-- Estimated Cost: ${cost:.4f} (using assumed GPT-4o-mini rates; verify current pricing)
-
-## Top Unresolved by Frequency (After Pass 1)
+#### Top Unresolved (After Pass 1)
 {top_unresolved_md}
-
-## Methodology
-1. **Pass 1 (High-Precision Rules)**: Regex-based matching. Ambiguous matches (multiple categories) are deferred.
-2. **Pass 2a (LLM Batch)**: GPT-4o-mini classification accepting only certainty='{CERTAINTY_A}'.
-3. **Pass 2b (LLM Calibration)**: GPT-4o-mini with canonical prototypes accepting certainty in {CERTAINTY_B}.
-4. **Fallback**: Anything below thresholds, invalid, or filtered by strategic sampling is mapped to {FALLBACK_CATEGORY}.
 """
         # Stable README update using helper from utils.py
         update_readme_report_block(
@@ -452,4 +430,3 @@ We process unique `doc_type` values using a Pareto-based strategic sampling appr
 if __name__ == "__main__":
     classifier = DocTypeClassifier()
     classifier.run_pipeline()
-
