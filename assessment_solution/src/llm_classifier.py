@@ -46,7 +46,10 @@ class DocTypeClassifier:
         load_env_file()
         self.api_key = get_env("OPENAI_API_KEY")
         
+        # Validate API Key Format (sk-...)
         if is_valid_api_key(self.api_key):
+            if not self.api_key.startswith("sk-"):
+                logger.warning("OPENAI_API_KEY does not start with 'sk-'. It may be invalid.")
             self.client = openai.OpenAI(api_key=self.api_key)
             logger.info("LLM enabled: true")
         else:
@@ -55,13 +58,16 @@ class DocTypeClassifier:
             if self.api_key:
                 logger.warning("OPENAI_API_KEY found but appears to be a placeholder or invalid.")
         
+        # Validate CATEGORIES/PROTOTYPES consistency
+        self._validate_config()
+
         # Pass 1 Rules (Regex)
         self.rules = {
             "SALE_DEED": [
                 r"\bWARRANTY\s+DEED\b", 
                 r"\bQUIT\s*CLAIM\b", 
                 r"\bGRANT\s+DEED\b", 
-                r"\bDEED\b(?!\s+OF\s+TRUST\b)", # Negative lookahead to avoid DOT ambiguity
+                r"\bDEED\b(?!\s+OF\s+TRUST\b)", 
                 r"\bCONVEYANCE\b"
             ],
             "MORTGAGE": [r"\bMORTGAGE\b", r"\bMTG\b"],
@@ -69,25 +75,31 @@ class DocTypeClassifier:
                 r"\bDEED\s+OF\s+TRUST\b", 
                 r"\bDOT\b", 
                 r"\bTRUST\s+DEED\b",
-                r"^(?:DT|D\s*T|D/T)$" # High-impact abbreviations
+                r"^(?:DT|D\s*T|D/T)$"
             ],
             "RELEASE": [
                 r"\bRELEASE\b", 
                 r"\bSATISFACTION\b", 
                 r"\bRECONVEYANCE\b", 
                 r"\bDISCHARGE\b",
-                r"^(?:SAT)$", # Exact match for SAT
+                r"^(?:SAT)$",
                 r"\bSAT\b"
             ],
             "LIEN": [r"\bLIEN\b", r"\bUCC\b", r"\bMECHANIC\b"],
             "PLAT": [
                 r"\bPLAT\b", 
                 r"\bSURVEY\b",
-                r"^(?:MAP|MAP/R)$", # Exact match for MAP/R
+                r"^(?:MAP|MAP/R)$",
                 r"\bMAP\b"
             ],
             "EASEMENT": [r"\bEASEMENT\b", r"\bRIGHT\s+OF\s+WAY\b", r"\bROW\b", r"(?:^|\s)R/W(?:\s|$)"],
             "LEASE": [r"\bLEASE\b"]
+        }
+        
+        # Pre-compile regex patterns for performance
+        self.compiled_rules = {
+            cat: [re.compile(p) for p in patterns] 
+            for cat, patterns in self.rules.items()
         }
 
         # Usage Tracking
@@ -99,6 +111,15 @@ class DocTypeClassifier:
         # GPT-4o-mini pricing as of Jan 2026 (approximate)
         self.PRICE_PER_1M_PROMPT = 0.15
         self.PRICE_PER_1M_COMPLETION = 0.60
+
+    def _validate_config(self):
+        """Ensure CATEGORIES and PROTOTYPES are in sync."""
+        for cat in CATEGORIES:
+            if cat not in PROTOTYPES:
+                logger.warning(f"Category '{cat}' missing from PROTOTYPES.")
+        for cat in PROTOTYPES:
+            if cat not in CATEGORIES:
+                logger.warning(f"Prototype category '{cat}' not in CATEGORIES list.")
 
     def extract_unique_doc_types(self, file_path: str) -> Tuple[Dict[str, int], int]:
         """Step 0: Extract unique doc_type values and frequencies."""
@@ -140,9 +161,9 @@ class DocTypeClassifier:
                 continue
                 
             matches = []
-            for category, patterns in self.rules.items():
+            for category, patterns in self.compiled_rules.items():
                 for pattern in patterns:
-                    if re.search(pattern, norm):
+                    if pattern.search(norm):
                         matches.append(category)
                         break # Move to next category
             
@@ -158,9 +179,8 @@ class DocTypeClassifier:
         return resolved, unresolved
 
     def call_llm(self, doc_types: List[str], use_prototypes: bool = False) -> List[Dict]:
-        """Helper to call LLM for a batch of doc_types."""
+        """Helper to call LLM for a batch of doc_types with retry logic."""
         if not self.client:
-            # Silent return as the pipeline already logs skipping info
             return []
 
         categories_str = ", ".join(CATEGORIES)
@@ -171,49 +191,53 @@ class DocTypeClassifier:
             "Return a JSON object with a 'results' key containing a list of objects: "
             "[{\"doc_type\": \"...\", \"category\": \"...\", \"certainty\": \"HIGH/MEDIUM/LOW\", \"reason\": \"...\"}]. "
             "\n\nCERTAINTY RUBRIC:"
-            "\n- HIGH: Clear direct match to a category or prototype."
-            "\n- MEDIUM: Plausible classification but not fully explicit."
-            "\n- LOW: Truly unclear or insufficient information. Avoid LOW unless necessary."
+            "\n- HIGH: Clear direct match."
+            "\n- MEDIUM: Plausible but not fully explicit."
+            "\n- LOW: Truly unclear. Avoid LOW unless necessary."
             "\n\nCRITICAL CONSTRAINTS:"
-            "\n1. Return doc_type EXACTLY as provided (verbatim). Do not modify whitespace, casing, or punctuation."
-            f"\n2. category MUST be exactly one of: {categories_str}, or 'MISC'."
-            "\n3. certainty MUST be exactly one of: 'HIGH', 'MEDIUM', or 'LOW'."
-            "\n4. reason MUST be a short explanation (3-7 words)."
-            "\n5. Output JSON object only, no markdown or prose."
+            "\n1. Return doc_type EXACTLY as provided (verbatim)."
+            f"\n2. category MUST be one of: {categories_str}, or 'MISC'."
+            "\n3. certainty MUST be: 'HIGH', 'MEDIUM', or 'LOW'."
+            "\n4. reason MUST be short (3-7 words)."
+            "\n5. Output JSON object only."
         )
         
         if use_prototypes:
             proto_str = "\n".join([f"{cat}: {', '.join(examples)}" for cat, examples in PROTOTYPES.items()])
             system_prompt += f"\n\nUse these prototypes for reference:\n{proto_str}"
 
-        user_prompt = f"Classify these document types: {json.dumps(doc_types)}"
+        user_prompt = f"Classify: {json.dumps(doc_types)}"
         
-        try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                response_format={"type": "json_object"},
-                temperature=0
-            )
-            
-            # Track Usage
-            if hasattr(response, 'usage') and response.usage:
-                self.usage["prompt_tokens"] += response.usage.prompt_tokens
-                self.usage["completion_tokens"] += response.usage.completion_tokens
-            self.usage["calls"] += 1
+        for attempt in range(2): # Simple retry for malformed JSON
+            try:
+                response = self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0
+                )
+                
+                if hasattr(response, 'usage') and response.usage:
+                    self.usage["prompt_tokens"] += response.usage.prompt_tokens
+                    self.usage["completion_tokens"] += response.usage.completion_tokens
+                self.usage["calls"] += 1
 
-            content = response.choices[0].message.content
-            data = json.loads(content)
-            return data.get("results", [])
-        except Exception as e:
-            logger.error(f"LLM call failed: {e}")
-            return []
+                content = response.choices[0].message.content
+                data = json.loads(content)
+                return data.get("results", [])
+            except json.JSONDecodeError:
+                logger.warning(f"Malformed JSON on attempt {attempt + 1}. Retrying...")
+                continue
+            except Exception as e:
+                logger.error(f"LLM call failed: {e}")
+                break
+        return []
 
-    def pass2_llm(self, unresolved: List[str], accepted_certainty: List[str], use_prototypes: bool = False, batch_size: int = 50) -> Tuple[Dict[str, str], List[str]]:
-        """Step 2: LLM classification (Pass 2a or 2b)."""
+    def pass2_llm(self, unresolved: List[str], accepted_certainty: List[str], use_prototypes: bool = False, batch_size: int = 100) -> Tuple[Dict[str, str], List[str]]:
+        """Step 2: LLM classification (Pass 2a or 2b). Optimized batch size."""
         label = "Pass 2b (Prototypes)" if use_prototypes else "Pass 2a (Batch)"
         logger.info(f"Running {label}...")
         resolved = {}

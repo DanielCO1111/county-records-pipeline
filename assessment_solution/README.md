@@ -785,25 +785,25 @@ RPM(N) = 60N / (t₀ + αN)
 
 ## Coverage Metrics (Unique Doc Types — unweighted)
 *These percentages are out of the 339 unique doc_type strings found in the dataset. Many rare/long-tail types may remain MISC.*
-- **Non-MISC types**: 119 / 339 (35.1%)
-- **MISC types**: 220 / 339 (64.9%)
+- **Non-MISC types**: 107 / 339 (31.6%)
+- **MISC types**: 232 / 339 (68.4%)
 - Breakdown by pass:
     - Resolved by Pass 1 (Rules): 95 (28.0%)
-    - Resolved by Pass 2a (LLM): 15 (4.4%)
-    - Resolved by Pass 2b (LLM+Proto): 9 (2.7%)
+    - Resolved by Pass 2a (LLM): 10 (2.9%)
+    - Resolved by Pass 2b (LLM+Proto): 2 (0.6%)
 
 ## Coverage Metrics (All Records — frequency-weighted by occurrence)
 *These percentages are out of the 13,886 total records. A small set of very common doc_type values can cover most records even if many rare types are MISC.*
-- **Non-MISC records**: 10983 / 13886 (79.1%)
-- **MISC records**: 2903 / 13886 (20.9%)
+- **Non-MISC records**: 10765 / 13886 (77.5%)
+- **MISC records**: 3121 / 13886 (22.5%)
 
 > **Note on Metrics**: It’s normal for MISC to be high by unique types but low by records because MISC often contains many low-frequency (long-tail) values that have minimal impact on overall dataset coverage.
 
 ## LLM Usage & Estimated Cost
-- Total LLM Calls: 10
-- Prompt Tokens: 5925
-- Completion Tokens: 15507
-- Estimated Cost: $0.0102 (using assumed GPT-4o-mini rates; verify current pricing)
+- Total LLM Calls: 6
+- Prompt Tokens: 4421
+- Completion Tokens: 15597
+- Estimated Cost: $0.0100 (using assumed GPT-4o-mini rates; verify current pricing)
 
 ## Top Unresolved by Frequency (After Pass 1)
 - `CANCELLATION` (203 records)
