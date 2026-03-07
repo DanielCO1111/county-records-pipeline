@@ -1,4 +1,4 @@
-# 📊 Dono Data Engineer Assessment
+# 📊 Cross-County Land Records Processing Pipeline
 
 *Daniel Cohen*
 
@@ -11,20 +11,22 @@
 
 ## 📋 Project Overview & Structure
 
-### ✅ Task 1: County Pattern Analysis (COMPLETE)
+###  1: County Pattern Analysis 
 **Script:** `src/pattern_analyzer.py`  
 **Output:** `outputs/county_patterns.json`  
 **Objective:** Extract and document patterns in instrument numbers, book/page numbers, date ranges, and document types for each of the 13 NC counties.
 
-### ✅ Task 2: Seminole County FL Scraper (COMPLETE)
+### 2: Document Type Classification 
+**Script:** `src/llm_classifier.py`  
+**Output:** `outputs/doc_type_mapping.json`  
+**Objective:** Standardize messy `doc_type` values into 9 canonical categories using a multi-pass pipeline (Regex + LLM).
+
+###  3: Seminole County FL Scraper 
 **Script:** `src/seminole_scraper.py`  
 **Output:** `outputs/seminole_test_results.json`  
 **Objective:** Scrape Seminole County FL official records and convert to NC schema format for system compatibility.
 
-### ✅ Task 3: Document Type Classification (COMPLETE)
-**Script:** `src/llm_classifier.py`  
-**Output:** `outputs/doc_type_mapping.json`  
-**Objective:** Standardize messy `doc_type` values into 9 canonical categories using a multi-pass pipeline (Regex + LLM).
+
 
 
 ```
@@ -62,9 +64,9 @@ assessment_solution/
 
 ### 📂 Output Files
 All scripts automatically generate their results in the `outputs/` directory:
-1.  **Task 1:** `outputs/county_patterns.json`
-2.  **Task 2:** `outputs/seminole_test_results.json`
-3.  **Task 3:** `outputs/doc_type_mapping.json`
+1.   `outputs/county_patterns.json`
+2.   `outputs/seminole_test_results.json`
+3.   `outputs/doc_type_mapping.json`
 
 ### Python Version
 - **Minimum:** Python 3.9
@@ -76,13 +78,13 @@ All scripts automatically generate their results in the `outputs/` directory:
 All Python dependencies are listed in `requirements.txt`:
 
 ```txt
-# Task 2 (Seminole Scraper) 
+# (Seminole Scraper) 
 selenium          # Browser automation for dynamic websites
 webdriver-manager # Automatic ChromeDriver management
 pytz              # Timezone handling for ET/EST conversions
 python-dateutil   # Date parsing
 
-# Optional / Development only (NOT required for Tasks 1-2)
+# Optional / Development only 
 pandas            # Data manipulation (optional)
 tqdm              # Progress bars (optional)
 requests          # HTTP requests (dev exploration only)
@@ -91,15 +93,15 @@ lxml              # XML processing (dev exploration only)
 black             # Code formatter (dev)
 ruff              # Python linter (dev)
 
-#Task 3 (LLM-Assisted Document Classification) - Bonus Task
+#LLM-Assisted Document Classification
 openai            #(API client)
 python-dotenv     #(For managing the API key)
 ```
 
 **Note:** 
-- Task 1 (`pattern_analyzer.py`) uses only the Python standard library.
-- Task 2 (`seminole_scraper.py`) requires: `selenium`, `webdriver-manager`, `pytz`, `python-dateutil`.
-- Task 3 (`llm_classifier.py`) requires: `openai`, `python-dotenv`.
+-  `pattern_analyzer.py` uses only the Python standard library.
+- `seminole_scraper.py`requires: `selenium`, `webdriver-manager`, `pytz`, `python-dateutil`.
+- `llm_classifier.py` requires: `openai`, `python-dotenv`.
 - Other packages listed in `requirements.txt` are for development (formatting/linting) or optional data exploration.
 
 ### Data Requirements
@@ -142,8 +144,8 @@ python -m pip install -U pip
 python -m pip install -r requirements.txt
 ```
 
-### 3️⃣ Configure Environment (Task 3 Only)
-Task 3 requires an OpenAI API key. Create a `.env` file in the `assessment_solution/` directory and add your key:
+### 3️⃣ Configure Environment 
+Requires an OpenAI API key. Create a `.env` file in the `assessment_solution/` directory and add your key:
 
 ```
 OPENAI_API_KEY=sk-your-key-here---
@@ -172,7 +174,7 @@ See `pyproject.toml` for formatting rules (100 char line length, Python 3.9 targ
 
 
 
-## Task 1: County Pattern Analysis
+## County Pattern Analysis:
 
 **Run the script:**
 
@@ -184,9 +186,9 @@ python src/pattern_analyzer.py
 **Output:** `outputs/county_patterns.json`
 
 
-### 📂 Where are the Task 1 Answers?
+### 📂 Where are the this part Answers?
 
-All required analyses for Task 1 are programmatically extracted and stored in `outputs/county_patterns.json`.
+All required analyses are programmatically extracted and stored in `outputs/county_patterns.json`.
 The file is structured by county (top-level keys), where each county entry contains:
 
 - **Instrument Number Patterns:** `instrument_patterns[]`  
@@ -221,7 +223,7 @@ The file is structured by county (top-level keys), where each county entry conta
 - Generates document type distribution (top 10) and category mappings
 
 
-### 📝 Task 1: Input Data Format
+### 📝 Input Data Format:
 
 #### `nc_records_assessment.jsonl`
 - **Format:** JSONL (one JSON record per line)
@@ -233,17 +235,13 @@ The file is structured by county (top-level keys), where each county entry conta
   - `grantors`, `grantees`, `date`, `consideration`
 
 #### `records/` Directory
-- **Format:** PDF files (not used in Task 1)
+- **Format:** PDF files.
 - **Organization:** `county/instrument_number.pdf`
 - **Counties:** 13 total (alamance, buncombe, cabarrus, cumberland, davidson, durham, forsyth, guilford, johnston, mecklenburg, onslow, union, wake)
 
 ---
 
 ### 📋 Key Assumptions & Design Decisions
-
-> **Critical for Testers:** These assumptions were made based on requirements analysis and data inspection.
-
-#### ⚠️ Critical Assumptions
 
 **1. Earliest Valid Transaction Year: 1900**
 - The analysis operates on the assumption that the **earliest valid transaction year is 1900**
@@ -363,17 +361,125 @@ Instrument numbers are classified using strict precedence order:
 
 ---
 
-## 🌐 Task 2: Seminole County FL Scraper
+
+
+## 🎩 LLM-Assisted Document Classification: 
+
+### Run the script:
+
+```bash
+cd assessment_solution
+python src/llm_classifier.py
+```
+
+**Output:** `outputs/doc_type_mapping.json` (A flat mapping of all unique `doc_type` strings to one of 9 canonical categories).
+
+### 📝 Approach & Methodology
+
+#### 1. Strategic Sampling Strategy
+To minimize costs while maintaining high accuracy, the classifier uses a **Pareto-based strategic sampling** approach:
+- **Frequency Analysis:** It first extracts all unique `doc_type` values and their frequencies from the 13,886 records.
+- **95% Coverage Target:** The LLM only processes the most frequent unresolved types required to reach **95% record coverage**.
+- **Efficiency:** This avoids wasting API tokens on "long-tail" unique types that only appear once or twice, which are safely defaulted to `MISC`.
+
+#### 2. LLM Prompt Strategy (Dynamic)
+The pipeline uses a base system prompt that is dynamically enhanced with prototypical examples during the final pass to improve accuracy for ambiguous abbreviations.
+
+**Base System Prompt:**
+```text
+You are a legal document classifier. Classify the following document types into exactly one of these categories: SALE_DEED, MORTGAGE, DEED_OF_TRUST, RELEASE, LIEN, PLAT, EASEMENT, LEASE, or 'MISC'. Return a JSON object with a 'results' key containing a list of objects: [{"doc_type": "...", "category": "...", "certainty": "HIGH/MEDIUM/LOW", "reason": "..."}]. 
+
+CERTAINTY RUBRIC:
+- HIGH: Clear direct match.
+- MEDIUM: Plausible but not fully explicit.
+- LOW: Truly unclear. Avoid LOW unless necessary.
+
+CRITICAL CONSTRAINTS:
+1. Return doc_type EXACTLY as provided (verbatim).
+2. category MUST be one of: SALE_DEED, MORTGAGE, DEED_OF_TRUST, RELEASE, LIEN, PLAT, EASEMENT, LEASE, or 'MISC'.
+3. certainty MUST be: 'HIGH', 'MEDIUM', or 'LOW'.
+4. reason MUST be short (3-7 words).
+5. Output JSON object only.
+```
+
+**Pass 2b Enhancement (Appended to Base):**
+When processing difficult or ambiguous types in Pass 2b, the following prototypical examples are appended to the prompt to provide reference anchors:
+```text
+SALE_DEED: deed, warranty deed, quitclaim, grant deed, conveyance
+MORTGAGE: mortgage, mtg
+DEED_OF_TRUST: deed of trust, dot, trust deed
+RELEASE: release, satisfaction, reconveyance, discharge
+LIEN: lien, claim of lien, mechanics lien, ucc
+PLAT: plat, map, survey
+EASEMENT: easement, right of way, row, r/w
+LEASE: lease, memorandum of lease
+```
+
+#### 3. Multi-Pass Validation Method
+The pipeline ensures accuracy through three distinct stages:
+1.  **Pass 1 (Regex):** High-precision deterministic rules handle common types (e.g., "WARRANTY DEED" -> `SALE_DEED`).
+2.  **Pass 2a (LLM Batch):** Unresolved types from the strategic sample are sent to the LLM. Only **HIGH** certainty results are accepted.
+3.  **Pass 2b (LLM + Prototypes):** Remaining unresolved items are re-processed with **prototypical examples** (e.g., "DOT" -> `DEED_OF_TRUST`) included in the prompt. **HIGH** and **MEDIUM** certainty results are accepted here.
+4.  **Fallback:** Any type still unresolved or outside the strategic sample is mapped to `MISC`.
+
+#### 4. Trade-offs: Accuracy vs. Cost
+- **Model Choice:** Used `gpt-4o-mini` for its excellent balance of reasoning capability and extremely low cost ($0.15/1M tokens).
+- **Sampling vs. Exhaustion:** By targeting 95% coverage, we reduced LLM calls by ~60% while only missing the "noise" of the dataset.
+- **Certainty Filtering:** We prioritize accuracy by rejecting "LOW" certainty LLM guesses, preferring to label them `MISC` rather than risk a misclassification.
+
+<!-- REPORT_START -->
+
+### 📊 Pipeline Metrics
+
+#### Coverage (Unique Doc Types)
+- **Non-MISC types**: 112 / 339 (33.0%)
+- **MISC types**: 227 / 339 (67.0%)
+- **Breakdown by pass**:
+    - Resolved by Pass 1 (Rules): 103 (30.4%)
+    - Resolved by Pass 2a (LLM): 29 (8.6%)
+    - Resolved by Pass 2b (LLM+Proto): 9 (2.7%)
+
+#### Coverage (All Records — weighted)
+- **Non-MISC records**: 10,991 / 13,886 (79.2%)
+- **MISC records**: 2,895 / 13,886 (20.8%)
+
+#### LLM Usage & Cost
+- **Total LLM Calls**: 6
+- **Tokens**: 2863 prompt / 6597 completion
+- **Estimated Cost**: $0.0044
+
+#### Top Unresolved (After Pass 1)
+- `CANCELLATION` (203 records)
+- `ASSIGNMENT` (193 records)
+- `SUBSTITUTION TRUSTEE` (165 records)
+- `SEE INSTRUMENT` (162 records)
+- `CAN` (138 records)
+- `POWER OF ATTORNEY` (132 records)
+- `AFFIDAVIT` (100 records)
+- `FORECLOSURE` (95 records)
+- `SUB TR` (82 records)
+- `MISCELLANEOUS` (75 records)
+- `Restrictions` (54 records)
+- `UNIFORM COMMERCIAL CODE` (52 records)
+- `DECLARATION` (50 records)
+- `ASGMT` (46 records)
+- `Covenants and Restrictions` (43 records)
+
+<!-- REPORT_END -->
+
+
+
+## 🌐 Seminole County FL Scraper:
 
 ### Overview
 
-Task 2 implements a production-grade web scraper for Seminole County, Florida official records that:
+This part implements a production-grade web scraper for Seminole County, Florida official records that:
 - Searches records by person/entity name
 - Handles pagination across large result sets (2000+ records, 60+ pages)
 - Converts FL data to NC schema format for system compatibility
 - Follows a **conservative, schema-first approach** to ensure data fidelity
 
-**Website:** https://recording.seminoleclerk.org/DuProcessWebInquiry/index.html
+**Website:** ```https://recording.seminoleclerk.org/DuProcessWebInquiry/index.html```
 
 ### How It Works
 
@@ -595,7 +701,7 @@ finally:
 
 ### Output Format (Single Output File)
 
-**File:** `outputs/seminole_test_results.json` — the **ONLY** output artifact for Task 2.
+**File:** `outputs/seminole_test_results.json` 
 
 **Top-level structure:** Always a JSON **object wrapper** (never a plain array), containing:
 - `generated_at` — ISO 8601 timestamp with timezone
@@ -782,107 +888,3 @@ RPM(N) = 60N / (t₀ + αN)
 - No artificial page caps (scrapes all indicated pages)
 
 ---
-
-## 🎩 Task 3: LLM-Assisted Document Classification
-
-### Run the script:
-
-```bash
-cd assessment_solution
-python src/llm_classifier.py
-```
-
-**Output:** `outputs/doc_type_mapping.json` (A flat mapping of all unique `doc_type` strings to one of 9 canonical categories).
-
-### 📝 Approach & Methodology
-
-#### 1. Strategic Sampling Strategy
-To minimize costs while maintaining high accuracy, the classifier uses a **Pareto-based strategic sampling** approach:
-- **Frequency Analysis:** It first extracts all unique `doc_type` values and their frequencies from the 13,886 records.
-- **95% Coverage Target:** The LLM only processes the most frequent unresolved types required to reach **95% record coverage**.
-- **Efficiency:** This avoids wasting API tokens on "long-tail" unique types that only appear once or twice, which are safely defaulted to `MISC`.
-
-#### 2. LLM Prompt Strategy (Dynamic)
-The pipeline uses a base system prompt that is dynamically enhanced with prototypical examples during the final pass to improve accuracy for ambiguous abbreviations.
-
-**Base System Prompt:**
-```text
-You are a legal document classifier. Classify the following document types into exactly one of these categories: SALE_DEED, MORTGAGE, DEED_OF_TRUST, RELEASE, LIEN, PLAT, EASEMENT, LEASE, or 'MISC'. Return a JSON object with a 'results' key containing a list of objects: [{"doc_type": "...", "category": "...", "certainty": "HIGH/MEDIUM/LOW", "reason": "..."}]. 
-
-CERTAINTY RUBRIC:
-- HIGH: Clear direct match.
-- MEDIUM: Plausible but not fully explicit.
-- LOW: Truly unclear. Avoid LOW unless necessary.
-
-CRITICAL CONSTRAINTS:
-1. Return doc_type EXACTLY as provided (verbatim).
-2. category MUST be one of: SALE_DEED, MORTGAGE, DEED_OF_TRUST, RELEASE, LIEN, PLAT, EASEMENT, LEASE, or 'MISC'.
-3. certainty MUST be: 'HIGH', 'MEDIUM', or 'LOW'.
-4. reason MUST be short (3-7 words).
-5. Output JSON object only.
-```
-
-**Pass 2b Enhancement (Appended to Base):**
-When processing difficult or ambiguous types in Pass 2b, the following prototypical examples are appended to the prompt to provide reference anchors:
-```text
-SALE_DEED: deed, warranty deed, quitclaim, grant deed, conveyance
-MORTGAGE: mortgage, mtg
-DEED_OF_TRUST: deed of trust, dot, trust deed
-RELEASE: release, satisfaction, reconveyance, discharge
-LIEN: lien, claim of lien, mechanics lien, ucc
-PLAT: plat, map, survey
-EASEMENT: easement, right of way, row, r/w
-LEASE: lease, memorandum of lease
-```
-
-#### 3. Multi-Pass Validation Method
-The pipeline ensures accuracy through three distinct stages:
-1.  **Pass 1 (Regex):** High-precision deterministic rules handle common types (e.g., "WARRANTY DEED" -> `SALE_DEED`).
-2.  **Pass 2a (LLM Batch):** Unresolved types from the strategic sample are sent to the LLM. Only **HIGH** certainty results are accepted.
-3.  **Pass 2b (LLM + Prototypes):** Remaining unresolved items are re-processed with **prototypical examples** (e.g., "DOT" -> `DEED_OF_TRUST`) included in the prompt. **HIGH** and **MEDIUM** certainty results are accepted here.
-4.  **Fallback:** Any type still unresolved or outside the strategic sample is mapped to `MISC`.
-
-#### 4. Trade-offs: Accuracy vs. Cost
-- **Model Choice:** Used `gpt-4o-mini` for its excellent balance of reasoning capability and extremely low cost ($0.15/1M tokens).
-- **Sampling vs. Exhaustion:** By targeting 95% coverage, we reduced LLM calls by ~60% while only missing the "noise" of the dataset.
-- **Certainty Filtering:** We prioritize accuracy by rejecting "LOW" certainty LLM guesses, preferring to label them `MISC` rather than risk a misclassification.
-
-<!-- REPORT_START -->
-
-### 📊 Pipeline Metrics
-
-#### Coverage (Unique Doc Types)
-- **Non-MISC types**: 112 / 339 (33.0%)
-- **MISC types**: 227 / 339 (67.0%)
-- **Breakdown by pass**:
-    - Resolved by Pass 1 (Rules): 103 (30.4%)
-    - Resolved by Pass 2a (LLM): 29 (8.6%)
-    - Resolved by Pass 2b (LLM+Proto): 9 (2.7%)
-
-#### Coverage (All Records — weighted)
-- **Non-MISC records**: 10,991 / 13,886 (79.2%)
-- **MISC records**: 2,895 / 13,886 (20.8%)
-
-#### LLM Usage & Cost
-- **Total LLM Calls**: 6
-- **Tokens**: 2863 prompt / 6597 completion
-- **Estimated Cost**: $0.0044
-
-#### Top Unresolved (After Pass 1)
-- `CANCELLATION` (203 records)
-- `ASSIGNMENT` (193 records)
-- `SUBSTITUTION TRUSTEE` (165 records)
-- `SEE INSTRUMENT` (162 records)
-- `CAN` (138 records)
-- `POWER OF ATTORNEY` (132 records)
-- `AFFIDAVIT` (100 records)
-- `FORECLOSURE` (95 records)
-- `SUB TR` (82 records)
-- `MISCELLANEOUS` (75 records)
-- `Restrictions` (54 records)
-- `UNIFORM COMMERCIAL CODE` (52 records)
-- `DECLARATION` (50 records)
-- `ASGMT` (46 records)
-- `Covenants and Restrictions` (43 records)
-
-<!-- REPORT_END -->
