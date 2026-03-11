@@ -434,21 +434,21 @@ The pipeline ensures accuracy through three distinct stages:
 ### 📊 Pipeline Metrics
 
 #### Coverage (Unique Doc Types)
-- **Non-MISC types**: 112 / 339 (33.0%)
-- **MISC types**: 227 / 339 (67.0%)
+- **Non-MISC types**: 106 / 339 (31.3%)
+- **MISC types**: 233 / 339 (68.7%)
 - **Breakdown by pass**:
     - Resolved by Pass 1 (Rules): 103 (30.4%)
-    - Resolved by Pass 2a (LLM): 29 (8.6%)
-    - Resolved by Pass 2b (LLM+Proto): 9 (2.7%)
+    - Resolved by Pass 2a (LLM): 7 (2.1%)
+    - Resolved by Pass 2b (LLM+Proto): 14 (4.1%)
 
 #### Coverage (All Records — weighted)
-- **Non-MISC records**: 10,991 / 13,886 (79.2%)
-- **MISC records**: 2,895 / 13,886 (20.8%)
+- **Non-MISC records**: 10,883 / 13,886 (78.4%)
+- **MISC records**: 3,003 / 13,886 (21.6%)
 
 #### LLM Usage & Cost
 - **Total LLM Calls**: 6
-- **Tokens**: 2863 prompt / 6597 completion
-- **Estimated Cost**: $0.0044
+- **Tokens**: 2984 prompt / 7362 completion
+- **Estimated Cost**: $0.0049
 
 #### Top Unresolved (After Pass 1)
 - `CANCELLATION` (203 records)
